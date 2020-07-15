@@ -12,6 +12,7 @@ $ docker-compose logs
 $ docker-compose exec db psql --username=dev --dbname=dev # Check database schemas
 ```
 
+Using [curl](https://curl.haxx.se):
 ```sh
 $ curl -X POST -d '{"url": "https://google.com"}' -H "Content-Type: application/json" http://localhost:8000/api/shorten | jq .
 {
@@ -19,4 +20,19 @@ $ curl -X POST -d '{"url": "https://google.com"}' -H "Content-Type: application/
 }
 ```
 
-Open brower at http://localhost:8000/Nw4IY0Y (the link will be varied because it depends on timestamp).
+Using [httpie](https://httpie.org):
+```sh
+$ http POST localhost:8000/api/shorten url=https://freecodecamp.org
+
+HTTP/1.1 200 OK
+content-length: 24
+content-type: application/json
+date: Wed, 15 Jul 2020 13:56:37 GMT
+server: uvicorn
+
+{
+    "short_link": "pk9nq5_"
+}
+```
+
+Open brower at http://localhost:8000/Nw4IY0Y or http://localhost:8000/pk9nq5_ (the links will be varied because it depends on timestamp).
