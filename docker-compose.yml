@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./src
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./src:/src
+    ports:
+      - 8000:8000
+    environment:
+      - DATABASE_URL=postgresql://dev:dev@db:5432/dev
+    depends_on:
+      - db
+
+  db:
+    image: postgres:12.3
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=dev
+      - POSTGRES_PASSWORD=dev
+      - POSTGRES_DB=dev
+
+volumes:
+  postgres_data:
