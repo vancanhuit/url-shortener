@@ -35,4 +35,4 @@ server: uvicorn
 }
 ```
 
-Open brower at http://localhost:8000/Nw4IY0Y or http://localhost:8000/pk9nq5_ (the links will be varied because it depends on timestamp).
+Open brower at http://localhost:8000/Nw4IY0Y or http://localhost:8000/pk9nq5_ (the links will be varied because they depend on timestamp).
