@@ -4,15 +4,15 @@
 
 
 ```sh
-$ git clone https://github.com/vancanhuit/url-shortener.git
+$ git clone https://github.com/anuraagnalluri/url-shortener-python 
 $ cd url-shortener
 $ docker-compose up -d --build
-$ docker-compose exec api alembic upgrade head # Run for the first time to initialize database schemas
 $ docker-compose logs
-$ docker-compose exec db psql --username=dev --dbname=dev # Check database schemas
 ```
 
-Using [curl](https://curl.haxx.se):
+Using [curl](https://curl.haxx.se)
+
+To shorten a link:
 ```sh
 $ curl -X POST -d '{"url": "https://google.com"}' -H "Content-Type: application/json" http://localhost:8000/api/shorten | jq .
 {
@@ -20,19 +20,4 @@ $ curl -X POST -d '{"url": "https://google.com"}' -H "Content-Type: application/
 }
 ```
 
-Using [httpie](https://httpie.org):
-```sh
-$ http POST localhost:8000/api/shorten url=https://freecodecamp.org
-
-HTTP/1.1 200 OK
-content-length: 24
-content-type: application/json
-date: Wed, 15 Jul 2020 13:56:37 GMT
-server: uvicorn
-
-{
-    "short_link": "pk9nq5_"
-}
-```
-
-Point your browser to http://localhost:8000/Nw4IY0Y or http://localhost:8000/pk9nq5_ (the links will be varied because they depend on timestamp).
+To access a shortened link, point your browser to http://localhost:8000/Nw4IY0Y
