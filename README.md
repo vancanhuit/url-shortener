@@ -2,6 +2,43 @@
 
 [https://github.com/tiangolo/fastapi](https://github.com/tiangolo/fastapi)
 
+```sh
+$ docker version
+ Version:           20.10.12
+ API version:       1.41
+ Go version:        go1.17.3
+ Git commit:        20.10.12-0ubuntu4
+ Built:             Mon Mar  7 17:10:06 2022
+ OS/Arch:           linux/amd64
+ Context:           default
+ Experimental:      true
+
+Server:
+ Engine:
+  Version:          20.10.12
+  API version:      1.41 (minimum version 1.12)
+  Go version:       go1.17.3
+  Git commit:       20.10.12-0ubuntu4
+  Built:            Mon Mar  7 15:57:50 2022
+  OS/Arch:          linux/amd64
+  Experimental:     false
+ containerd:
+  Version:          1.5.9-0ubuntu3
+  GitCommit:
+ runc:
+  Version:          1.1.0-0ubuntu1
+  GitCommit:
+ docker-init:
+  Version:          0.19.0
+  GitCommit:
+
+$ docker-compose version
+docker-compose version 1.29.2, build 5becea4c
+docker-py version: 5.0.0
+CPython version: 3.7.10
+OpenSSL version: OpenSSL 1.1.0l  10 Sep 2019
+```
+
 
 ```sh
 $ git clone https://github.com/vancanhuit/url-shortener.git
