@@ -19,6 +19,12 @@ services:
       - POSTGRES_USER=dev
       - POSTGRES_PASSWORD=dev
       - POSTGRES_DB=dev
+    healthcheck:
+      test: ["CMD", "pg_isready -d dev -U dev"]
+      interval: 10s
+      timeout: 30s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres_data:
