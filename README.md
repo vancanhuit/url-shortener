@@ -49,7 +49,7 @@ $ docker-compose logs
 $ docker-compose exec db psql --username=dev --dbname=dev # Check database schemas
 ```
 
-Using [curl](https://curl.haxx.se):
+Using [curl](https://curl.haxx.se) and [jq](https://stedolan.github.io/jq/):
 ```sh
 $ curl -X POST -d '{"url": "https://google.com"}' -H "Content-Type: application/json" http://localhost:8000/api/shorten | jq .
 {
