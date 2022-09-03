@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import DBAPIError
 
 
-DATABASE_URL = os.getenv('DATABASE_URL')
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///app.db')
 engine = create_engine(DATABASE_URL)
 Base = declarative_base()
 DBSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
