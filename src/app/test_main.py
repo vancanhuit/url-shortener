@@ -1,8 +1,9 @@
-import json
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app)
+
 
 def test_main():
     response = client.post(
@@ -18,3 +19,7 @@ def test_main():
 
     response = client.get("/{}".format(short_link), allow_redirects=False)
     assert response.status_code == 307
+    assert response.headers["Location"] == "https://www.reddit.com"
+
+    response = client.get("/non-existing-url", allow_redirects=False)
+    assert response.status_code == 404
