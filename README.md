@@ -1,5 +1,7 @@
 # URL Shortener with FastAPI
 
+[![CI](https://github.com/vancanhuit/url-shortener/actions/workflows/ci.yaml/badge.svg?branch=master)](https://github.com/vancanhuit/url-shortener/actions/workflows/ci.yaml)
+
 [https://github.com/tiangolo/fastapi](https://github.com/tiangolo/fastapi)
 
 ```sh
