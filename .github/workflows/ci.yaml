@@ -41,4 +41,4 @@ jobs:
       run: cd src && pytest
       env:
         DATABASE_URL: postgresql://test:test@localhost:5432/test
-        PYTHONPATH: ${{ github.workspace }}/src"
+        PYTHONPATH: ${{ github.workspace }}/src
