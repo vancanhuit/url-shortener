@@ -10,6 +10,9 @@ on:
 
 jobs:
   test:
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+
     runs-on: ubuntu-latest
     services:
       testdb:
@@ -45,5 +48,4 @@ jobs:
         run: pytest
         working-directory: ./src
         env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test
           PYTHONPATH: ${{ github.workspace }}/src
