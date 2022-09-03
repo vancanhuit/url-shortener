@@ -27,7 +27,12 @@ def get_short_link(
 
 @app.get("/{short_link}")
 def redirect(short_link: str, db: Session = Depends(get_db_session)):
-    obj = db.query(ShortenedUrl).filter_by(short_link=short_link).order_by(ShortenedUrl.id.desc()).first()
+    obj = (
+        db.query(ShortenedUrl)
+        .filter_by(short_link=short_link)
+        .order_by(ShortenedUrl.id.desc())
+        .first()
+    )
     if obj is None:
         raise HTTPException(
             status_code=404, detail="The link does not exist, could not redirect."
