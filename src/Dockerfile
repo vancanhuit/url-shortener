@@ -7,7 +7,12 @@ ENV PYTHONPATH /src
 
 COPY ./requirements.txt .
 
-RUN pip install -U pip && \
-    pip install -r requirements.txt
+RUN apt-get update && \
+    apt-get --yes install gcc python3-dev libpq-dev && \
+    apt-get autoclean && apt-get autoremove && \
+    apt-get clean
+
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .

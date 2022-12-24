@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       testdb:
-        image: postgres:14.5
+        image: postgres:15.1-bullseye
         ports:
           - 5432:5432
         env:
@@ -40,6 +40,7 @@ jobs:
       - name: Install dependencies
         working-directory: ./src
         run: |
+          sudo apt-get --yes install gcc python3-dev libpq-dev
           pip install --upgrade pip
           pip install -r requirements.txt
 

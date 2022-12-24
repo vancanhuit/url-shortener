@@ -17,9 +17,9 @@ def test_main():
         short_link = response.json()["short_link"]
         assert len(short_link) == 7
 
-        response = client.get("/{}".format(short_link), allow_redirects=False)
+        response = client.get("/{}".format(short_link), follow_redirects=False)
         assert response.status_code == 307
         assert response.headers["Location"] == url
 
-        response = client.get("/non-existing-path", allow_redirects=False)
+        response = client.get("/non-existing-path", follow_redirects=False)
         assert response.status_code == 404
