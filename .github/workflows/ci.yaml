@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       testdb:
-        image: postgres:15.1-bullseye
+        image: postgres:15.3-bullseye
         ports:
           - 5432:5432
         env:

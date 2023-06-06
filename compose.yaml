@@ -13,7 +13,7 @@ services:
         condition: service_healthy
 
   db:
-    image: postgres:15.1-bullseye
+    image: postgres:15.3-bullseye
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
