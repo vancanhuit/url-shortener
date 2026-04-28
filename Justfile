@@ -22,11 +22,13 @@ help:
     @just --list --unsorted
 
 # One-time bootstrap: install Node devDependencies (husky + commitlint).
+# Uses `npm ci` for deterministic installs when a lockfile is present so CI
+# and local environments stay in sync.
 init:
     @if [ ! -f package.json ]; then \
         echo "package.json missing"; exit 1; \
     fi
-    npm install
+    npm ci
 
 # Build the binary into ./bin/url-shortener.
 build:
@@ -65,6 +67,11 @@ tidy:
 # Lint just the most recent commit message.
 commitlint-last:
     npx --no -- commitlint --from=HEAD~1 --to=HEAD
+
+# Lint a single commit-message string (used by the CI PR-title check).
+# Usage: just commitlint-msg "feat: add things"
+commitlint-msg MSG:
+    @echo {{quote(MSG)}} | npx --no -- commitlint
 
 # Print commits since a given tag, grouped by conventional-commit type.
 # Usage: just changelog-since v0.1.0
