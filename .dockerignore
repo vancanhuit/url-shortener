@@ -1,0 +1,26 @@
+.git
+.github
+.husky
+.idea
+.vscode
+
+# Build artifacts
+bin/
+dist/
+coverage.out
+coverage.html
+
+# Local Node tooling (not needed inside the Go image build)
+node_modules/
+
+# Tailwind output (rebuilt in a later phase's CSS stage)
+web/static/app.css
+
+# Local env files
+.env
+.env.local
+.envrc
+
+# Docs / planning artifacts unrelated to the build
+*.md
+!README.md

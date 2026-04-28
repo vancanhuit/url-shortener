@@ -5,9 +5,10 @@
 #   git describe --tags --always --dirty --match 'v[0-9]*'
 # Tags themselves start with `v`; the binary's version string strips that prefix
 # when the working tree is on an exact tag.
-VERSION := `git describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null | sed -E 's/^v//' || echo "0.0.0-dev"`
-COMMIT  := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
-DATE    := `date -u +%Y-%m-%dT%H:%M:%SZ`
+VERSION   := `git describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null | sed -E 's/^v//' || echo "0.0.0-dev"`
+COMMIT    := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
+DATE      := `date -u +%Y-%m-%dT%H:%M:%SZ`
+PLATFORMS := "linux/amd64,linux/arm64"
 
 LDFLAGS := "-s -w" + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=" + VERSION + \
@@ -83,6 +84,46 @@ changelog-since TAG:
         /^perf(\(.+\))?!?: / {print "\n### Performance";print "- " $0; next} \
         /^docs(\(.+\))?!?: / {print "\n### Docs";       print "- " $0; next} \
         {print "\n### Other"; print "- " $0}'
+
+# --- Docker / compose ---------------------------------------------------------
+
+# Build the Docker image locally for the host's architecture only.
+docker-build:
+    docker build \
+        --build-arg VERSION={{VERSION}} \
+        --build-arg COMMIT={{COMMIT}} \
+        --build-arg DATE={{DATE}} \
+        -t url-shortener:{{VERSION}} \
+        -t url-shortener:dev \
+        .
+
+# Multi-arch build for linux/amd64 + linux/arm64. By default loads nothing
+# (buildx cannot --load multi-arch into the local daemon); pass `true`
+# as the first argument to publish to a registry.
+docker-buildx PUSH="false":
+    docker buildx build \
+        --platform {{PLATFORMS}} \
+        --build-arg VERSION={{VERSION}} \
+        --build-arg COMMIT={{COMMIT}} \
+        --build-arg DATE={{DATE}} \
+        -t url-shortener:{{VERSION}} \
+        {{ if PUSH == "true" { "--push" } else { "--output=type=image,push=false" } }} \
+        .
+
+# Bring up the local stack (db + redis + api). Builds the api image first.
+up:
+    docker compose up --build -d
+    docker compose ps
+
+# Tear down the local stack and remove volumes.
+down:
+    docker compose down -v
+
+# Tail logs from all compose services (Ctrl-C to exit).
+logs *ARGS:
+    docker compose logs -f {{ARGS}}
+
+# --- CI -----------------------------------------------------------------------
 
 # Placeholder for the Dagger-driven CI; wired up in a later phase.
 ci:

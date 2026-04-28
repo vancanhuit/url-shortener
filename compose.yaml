@@ -1,0 +1,73 @@
+# Local development stack.
+#
+# Phase 2 scope: bring up Postgres + Redis healthy, plus the api container
+# (which currently exits cleanly because the binary is still a stub --
+# subcommands like `run` and `migrate` are added in later phases).
+#
+# Reverse proxy (Caddy) is added in Phase 5 once the HTTP server exists.
+
+name: url-shortener
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+        COMMIT: dev
+    image: url-shortener:dev
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      URL_SHORTENER_ADDR: ":8080"
+      URL_SHORTENER_ENV: dev
+      URL_SHORTENER_LOG_LEVEL: debug
+      URL_SHORTENER_LOG_FORMAT: text
+      URL_SHORTENER_DATABASE_URL: postgres://postgres:postgres@db:5432/url_shortener?sslmode=disable
+      URL_SHORTENER_REDIS_URL: redis://redis:6379/0
+      URL_SHORTENER_BASE_URL: http://localhost:8080
+    ports:
+      - "8080:8080"
+    # The binary is still a stub; restarting on exit would loop forever.
+    restart: "no"
+
+  db:
+    image: postgres:18.3-trixie
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: url_shortener
+    volumes:
+      # Postgres 18+ expects a single mount at /var/lib/postgresql; the actual
+      # data dir lives in a versioned subdirectory inside it (e.g. 18/docker).
+      - db_data:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d url_shortener"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.6.2-trixie
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  redis_data:
