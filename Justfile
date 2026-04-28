@@ -5,10 +5,14 @@
 #   git describe --tags --always --dirty --match 'v[0-9]*'
 # Tags themselves start with `v`; the binary's version string strips that prefix
 # when the working tree is on an exact tag.
-VERSION   := `git describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null | sed -E 's/^v//' || echo "0.0.0-dev"`
-COMMIT    := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
-DATE      := `date -u +%Y-%m-%dT%H:%M:%SZ`
-PLATFORMS := "linux/amd64,linux/arm64"
+VERSION                := `git describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null | sed -E 's/^v//' || echo "0.0.0-dev"`
+COMMIT                 := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
+DATE                   := `date -u +%Y-%m-%dT%H:%M:%SZ`
+PLATFORMS              := "linux/amd64,linux/arm64"
+# golangci-lint version. CI overrides this via the GOLANGCI_LINT_VERSION
+# env var defined in .github/workflows/ci.yaml so there is a single source of
+# truth per run; the literal here is the default for local development.
+GOLANGCI_LINT_VERSION  := env("GOLANGCI_LINT_VERSION", "2.11.4")
 
 LDFLAGS := "-s -w" + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=" + VERSION + \
@@ -53,13 +57,28 @@ test:
 test-integration:
     go test -race -tags=integration ./...
 
-# Run linters (requires golangci-lint v2 in PATH).
-lint:
-    golangci-lint run
+# Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into $GOPATH/bin.
+# Idempotent: a no-op when the right version is already present.
+lint-install:
+    @gobin="$(go env GOPATH)/bin"; \
+    bin="$gobin/golangci-lint"; \
+    want="{{GOLANGCI_LINT_VERSION}}"; \
+    have="$([ -x "$bin" ] && "$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo none)"; \
+    if [ "$have" = "$want" ]; then \
+        echo "golangci-lint $want already installed at $bin"; \
+    else \
+        echo "installing golangci-lint $want into $gobin (have: $have)"; \
+        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b "$gobin" "v$want"; \
+    fi
+
+# Run linters (auto-installs golangci-lint at the pinned version if missing).
+lint: lint-install
+    "$(go env GOPATH)/bin/golangci-lint" run
 
 # Format code (gofumpt + goimports via golangci-lint formatters).
-fmt:
-    golangci-lint fmt
+fmt: lint-install
+    "$(go env GOPATH)/bin/golangci-lint" fmt
 
 # Tidy go.mod / go.sum.
 tidy:

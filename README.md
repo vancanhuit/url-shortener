@@ -22,7 +22,7 @@ A small URL shortener service written in Go.
 
 ## Getting started
 
-Prerequisites: Go 1.26+, Node.js 20+, Just, `golangci-lint` v2, Docker
+Prerequisites: Go 1.26+, Node.js 24+, Just, `golangci-lint` v2, Docker
 (for the local stack).
 
 ```sh
@@ -30,19 +30,51 @@ just init        # install husky/commitlint dev dependencies
 just build       # build ./bin/url-shortener
 just test        # run unit tests
 just lint        # run golangci-lint
+just up          # bring up the local Postgres + Redis stack
+just down        # tear it down (also removes volumes)
 ```
 
-The CLI surface, HTTP server, database integration, and CI pipeline are added
-in subsequent phases of the rewrite plan; this commit is the project scaffold.
+## Usage
+
+```sh
+./bin/url-shortener --help        # list all subcommands
+./bin/url-shortener version       # print version / commit / build date
+./bin/url-shortener version --json
+./bin/url-shortener config        # print resolved config (secrets redacted)
+./bin/url-shortener run           # start the HTTP server (stub: wired up in a later phase)
+./bin/url-shortener migrate up    # run database migrations (stub: wired up in a later phase)
+```
+
+## Configuration
+
+All configuration comes from environment variables prefixed with
+`URL_SHORTENER_` (12-factor style). Defaults are tuned for production; the
+local `compose.yaml` overrides them for development.
+
+| Variable                       | Default                       | Description                                         |
+| ------------------------------ | ----------------------------- | --------------------------------------------------- |
+| `URL_SHORTENER_ENV`            | `prod`                        | `dev` or `prod`. Influences log-format default.     |
+| `URL_SHORTENER_ADDR`           | `:8080`                       | TCP listen address.                                 |
+| `URL_SHORTENER_BASE_URL`       | `http://localhost:8080`       | Public origin used when building short-link URLs.   |
+| `URL_SHORTENER_LOG_LEVEL`      | `info`                        | One of `debug`, `info`, `warn`, `error`.            |
+| `URL_SHORTENER_LOG_FORMAT`     | `text` in dev, `json` in prod | `text` (human-readable) or `json` (structured).     |
+| `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | Postgres connection string. Redacted when printed.  |
+| `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | Redis connection string. Redacted when printed.     |
+
+Run `url-shortener config` to print the fully resolved configuration with
+passwords replaced by `REDACTED`.
 
 ## Layout (target)
 
+Directories marked _(present)_ already exist on `main`; the rest are added in
+upcoming phases of the rewrite plan.
+
 ```
-cmd/url-shortener/        binary entry point
+cmd/url-shortener/        binary entry point                            (present)
 internal/
-  cli/                    cobra commands (run, migrate, version, config)
-  config/                 viper-based env config loader
-  buildinfo/              version / commit / date set via -ldflags
+  cli/                    cobra commands (run, migrate, version, config) (present)
+  config/                 viper-based env config loader                   (present)
+  buildinfo/              version / commit / date set via -ldflags        (present)
   server/                 echo setup, middleware, lifecycle
   handlers/               http handlers (json api + html + health)
   shortener/              short-code generation
