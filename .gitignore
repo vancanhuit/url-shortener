@@ -1,0 +1,27 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.out
+coverage.html
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Env files
+.env
+.env.local
+.envrc
+
+# Node (commitlint / tailwind toolchain)
+node_modules/
+
+# Tailwind output (built in CI / Docker)
+/web/static/app.css
