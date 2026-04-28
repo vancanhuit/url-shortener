@@ -23,18 +23,15 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24.14.1
           cache: npm
       - uses: extractions/setup-just@v2
       - run: just init
-      - name: Validate commit messages
-        uses: wagoid/commitlint-github-action@v6
-        with:
-          configFile: commitlint.config.js
+      # The PR title becomes the squash-merge commit message on `main`, so
+      # that's the message that has to be conventional. Per-commit hygiene
+      # is enforced locally by the husky `commit-msg` hook.
       - name: Validate PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
