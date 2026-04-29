@@ -54,6 +54,10 @@ type Config struct {
 	// and run `migrate up` as a separate one-shot step (avoids races between
 	// replicas).
 	AutoMigrate bool `mapstructure:"auto_migrate" json:"auto_migrate"`
+
+	// CodeLength is the length of auto-generated short codes. Validated by
+	// the shortener package: must be in [shortener.MinLength, MaxLength].
+	CodeLength int `mapstructure:"code_length" json:"code_length"`
 }
 
 // Load reads the configuration from environment variables and applies the
@@ -69,7 +73,7 @@ func Load() (Config, error) {
 	// key has no default (notably log_format, whose default depends on env).
 	for _, key := range []string{
 		"env", "addr", "base_url", "log_level", "log_format",
-		"database_url", "redis_url", "auto_migrate",
+		"database_url", "redis_url", "auto_migrate", "code_length",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -78,6 +82,7 @@ func Load() (Config, error) {
 	v.SetDefault("addr", ":8080")
 	v.SetDefault("base_url", "http://localhost:8080")
 	v.SetDefault("log_level", "info")
+	v.SetDefault("code_length", 7)
 	// log_format default is decided after env is known (text in dev, json in prod).
 
 	var cfg Config
@@ -127,6 +132,12 @@ func (c Config) Validate() error {
 	}
 	if _, err := url.Parse(c.BaseURL); err != nil {
 		return fmt.Errorf("config: base_url is not a valid URL: %w", err)
+	}
+	// Redis is a required runtime dependency: the cache is on the hot path
+	// for redirect lookups and the API treats it as always-present. Refuse
+	// to start instead of silently degrading.
+	if c.RedisURL == "" {
+		return fmt.Errorf("config: redis_url must not be empty")
 	}
 	return nil
 }
