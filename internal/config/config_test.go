@@ -10,6 +10,8 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	clearEnv(t)
+	// Redis is a required field; set the minimum needed for Load() to succeed.
+	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -28,11 +30,15 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.LogFormat != "json" {
 		t.Errorf("LogFormat = %q, want json (prod default)", cfg.LogFormat)
 	}
+	if cfg.CodeLength != 7 {
+		t.Errorf("CodeLength = %d, want 7", cfg.CodeLength)
+	}
 }
 
 func TestLoad_DevDefaultsLogFormatToText(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("URL_SHORTENER_ENV", "dev")
+	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -52,6 +58,8 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	t.Setenv("URL_SHORTENER_LOG_FORMAT", "json")
 	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://h:6379/0")
+	t.Setenv("URL_SHORTENER_AUTO_MIGRATE", "true")
+	t.Setenv("URL_SHORTENER_CODE_LENGTH", "9")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -66,6 +74,8 @@ func TestLoad_EnvOverrides(t *testing.T) {
 		LogFormat:   "json",
 		DatabaseURL: "postgres://u:p@h:5432/db",
 		RedisURL:    "redis://h:6379/0",
+		AutoMigrate: true,
+		CodeLength:  9,
 	}
 	if cfg != want {
 		t.Errorf("cfg = %+v\nwant %+v", cfg, want)
@@ -75,12 +85,16 @@ func TestLoad_EnvOverrides(t *testing.T) {
 func TestValidate_RejectsBadValues(t *testing.T) {
 	t.Parallel()
 
+	// Every case sets a non-empty RedisURL so the failure is attributable to
+	// the field under test, except for the dedicated empty-redis case.
+	const redisOK = "redis://localhost:6379/0"
 	cases := map[string]config.Config{
-		"bad env":        {Env: "staging", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json"},
-		"bad log_level":  {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "trace", LogFormat: "json"},
-		"bad log_format": {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "yaml"},
-		"empty addr":     {Env: "prod", Addr: "", BaseURL: "x", LogLevel: "info", LogFormat: "json"},
-		"empty baseurl":  {Env: "prod", Addr: ":8080", BaseURL: "", LogLevel: "info", LogFormat: "json"},
+		"bad env":         {Env: "staging", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", RedisURL: redisOK},
+		"bad log_level":   {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "trace", LogFormat: "json", RedisURL: redisOK},
+		"bad log_format":  {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "yaml", RedisURL: redisOK},
+		"empty addr":      {Env: "prod", Addr: "", BaseURL: "x", LogLevel: "info", LogFormat: "json", RedisURL: redisOK},
+		"empty baseurl":   {Env: "prod", Addr: ":8080", BaseURL: "", LogLevel: "info", LogFormat: "json", RedisURL: redisOK},
+		"empty redis_url": {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", RedisURL: ""},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -36,10 +36,12 @@ const (
 
 // Deps groups the optional runtime dependencies the server needs. Each
 // field may be nil; the server gracefully degrades (e.g. /readyz simply
-// omits checks for missing deps).
+// omits checks for missing deps and the links API is not mounted when
+// Store is missing).
 type Deps struct {
-	Store *store.Store
-	Cache *cache.Client
+	Store     *store.Store
+	Cache     *cache.Client
+	Generator handlers.Generator
 }
 
 // Server is the HTTP server with its dependencies and lifecycle.
@@ -69,6 +71,20 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		op.AddReadinessCheck("redis", deps.Cache.Ping)
 	}
 	op.Mount(e)
+
+	// Links API + redirect: requires the full set of deps. Cache is
+	// non-optional -- the handler treats it as always-present (config
+	// validation guarantees URL_SHORTENER_REDIS_URL is set in production).
+	if deps.Store != nil && deps.Cache != nil && deps.Generator != nil {
+		links := handlers.NewLinks(handlers.LinksConfig{
+			Store:     deps.Store,
+			Cache:     deps.Cache,
+			Generator: deps.Generator,
+			BaseURL:   cfg.BaseURL,
+			Logger:    logger,
+		})
+		links.Mount(e)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,

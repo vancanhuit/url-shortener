@@ -10,6 +10,7 @@ import (
 	"github.com/vancanhuit/url-shortener/internal/config"
 	"github.com/vancanhuit/url-shortener/internal/migrate"
 	"github.com/vancanhuit/url-shortener/internal/server"
+	"github.com/vancanhuit/url-shortener/internal/shortener"
 	"github.com/vancanhuit/url-shortener/internal/store"
 )
 
@@ -51,23 +52,29 @@ func newRunCmd() *cobra.Command {
 				logger.Warn("URL_SHORTENER_DATABASE_URL is empty; running without a database")
 			}
 
-			var cc *cache.Client
-			if cfg.RedisURL != "" {
-				cc, err = cache.New(cmd.Context(), cfg.RedisURL)
-				if err != nil {
-					return err
-				}
-				defer func() { _ = cc.Close() }()
-			} else {
-				logger.Warn("URL_SHORTENER_REDIS_URL is empty; running without a cache")
+			// Redis is a required dependency (enforced by config.Validate),
+			// so RedisURL is guaranteed to be non-empty here.
+			cc, err := cache.New(cmd.Context(), cfg.RedisURL)
+			if err != nil {
+				return err
 			}
+			defer func() { _ = cc.Close() }()
 
 			// Cancel the run context on SIGINT/SIGTERM so the server can
 			// shut down gracefully.
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			srv := server.New(cfg, logger, server.Deps{Store: st, Cache: cc})
+			gen, err := shortener.NewGenerator(cfg.CodeLength)
+			if err != nil {
+				return err
+			}
+
+			srv := server.New(cfg, logger, server.Deps{
+				Store:     st,
+				Cache:     cc,
+				Generator: gen,
+			})
 			return srv.Run(ctx)
 		},
 	}
