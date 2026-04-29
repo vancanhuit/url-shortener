@@ -48,14 +48,15 @@ run *ARGS:
 version:
     @go run ./cmd/url-shortener version 2>/dev/null || echo "Version (resolved): {{VERSION}}"
 
-# Run all unit tests.
+# Run all unit tests with verbose output and per-package coverage.
 test:
-    go test -race ./...
+    go test -race -v -cover ./...
 
-# Run unit + integration tests. Integration tests are gated by env vars
-# (DATABASE_URL, REDIS_URL) and added in later phases.
+# Run unit + integration tests. Integration tests are gated by build tag and
+# typically also by env vars (e.g. URL_SHORTENER_DATABASE_URL); they skip
+# cleanly when the dependency isn't reachable.
 test-integration:
-    go test -race -tags=integration ./...
+    go test -race -v -cover -tags=integration ./...
 
 # Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into $GOPATH/bin.
 # Idempotent: a no-op when the right version is already present.
@@ -73,8 +74,12 @@ lint-install:
     fi
 
 # Run linters (auto-installs golangci-lint at the pinned version if missing).
+# `--build-tags=integration` is passed so files under `//go:build integration`
+# (e.g. internal/store/*_integration_test.go) are linted alongside the rest.
+# `-v` makes diagnostics (active linters, build tags, exclusions, timings)
+# visible in CI logs without changing the issue output.
 lint: lint-install
-    "$(go env GOPATH)/bin/golangci-lint" run
+    "$(go env GOPATH)/bin/golangci-lint" run -v --build-tags=integration
 
 # Format code (gofumpt + goimports via golangci-lint formatters).
 fmt: lint-install
