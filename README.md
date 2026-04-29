@@ -26,12 +26,14 @@ Prerequisites: Go 1.26+, Node.js 24+, Just, `golangci-lint` v2, Docker
 (for the local stack).
 
 ```sh
-just init        # install husky/commitlint dev dependencies
-just build       # build ./bin/url-shortener
-just test        # run unit tests
-just lint        # run golangci-lint
-just up          # bring up the local Postgres + Redis stack
-just down        # tear it down (also removes volumes)
+just init             # install husky/commitlint dev dependencies
+just build            # build ./bin/url-shortener
+just test             # run unit tests with -race -v -cover
+just test-integration # bring up infra, migrate, run -tags=integration tests
+just lint             # run golangci-lint (auto-installs the pinned version)
+just up               # bring up infra (db + redis) for native iteration
+just dev              # bring up the full Docker stack (db + redis + server)
+just down             # tear it down (also removes volumes)
 ```
 
 ## Usage
@@ -45,6 +47,8 @@ just down        # tear it down (also removes volumes)
 ./bin/url-shortener migrate up    # apply pending database migrations
 ./bin/url-shortener migrate down  # roll back the most recent migration
 ./bin/url-shortener migrate status
+./bin/url-shortener migrate up --database-url postgres://...  # override URL_SHORTENER_DATABASE_URL
+./bin/url-shortener healthcheck   # probe /healthz; used by the docker HEALTHCHECK
 ```
 
 ## Configuration
@@ -62,6 +66,7 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_LOG_FORMAT`     | `text` in dev, `json` in prod | `text` (human-readable) or `json` (structured).     |
 | `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | Postgres connection string. Redacted when printed.  |
 | `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | Redis connection string. Redacted when printed.     |
+| `URL_SHORTENER_AUTO_MIGRATE`   | `false`                       | When `true`, `run` applies migrations before serving. Convenient for local dev / single-replica CI; production deployments should leave this off and run `migrate up` as a separate step. |
 
 Run `url-shortener config` to print the fully resolved configuration with
 passwords replaced by `REDACTED`.
@@ -76,8 +81,9 @@ The HTTP server exposes three operational endpoints:
 | `/readyz`   | Readiness probe                  | Pings every registered dependency. Returns `200` when all are healthy, `503` otherwise.       |
 | `/version`  | Build metadata                   | Returns `{"version":"...","commit":"...","date":"..."}` baked into the binary at build time.  |
 
-`/readyz` currently checks Postgres (when `URL_SHORTENER_DATABASE_URL` is
-set). Redis will be added when the cache lands.
+`/readyz` checks Postgres (when `URL_SHORTENER_DATABASE_URL` is set) and
+Redis (when `URL_SHORTENER_REDIS_URL` is set). Each check has its own line
+in the JSON body so operators can see which dependency is unhappy.
 
 ## Layout (target)
 
@@ -94,7 +100,7 @@ internal/
   handlers/               http handlers (operational; json api + html added later) (present)
   shortener/              short-code generation
   store/                  pgx-based repository                           (present)
-  cache/                  redis client wrapper
+  cache/                  redis client wrapper                           (present)
   migrate/                goose runner over embedded SQL                 (present)
 migrations/               goose .sql migrations (//go:embed)             (present)
 web/templates/            html/template files

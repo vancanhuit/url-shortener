@@ -5,8 +5,9 @@
 //	just test-integration
 //
 // (which sets `-tags=integration`). Requires a live Postgres reachable via
-// $URL_SHORTENER_DATABASE_URL with the migrations already applied -- the
-// canonical setup is `just up` followed by `url-shortener migrate up`.
+// $URL_SHORTENER_TEST_DATABASE_URL with the migrations already applied --
+// the canonical setup is `just up-test`, which brings up db+redis and runs
+// the migration one-shot.
 
 package store_test
 
@@ -24,9 +25,9 @@ import (
 
 func newStore(t *testing.T) *store.Store {
 	t.Helper()
-	url := os.Getenv("URL_SHORTENER_DATABASE_URL")
+	url := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("URL_SHORTENER_DATABASE_URL not set; skipping integration test")
+		t.Skip("URL_SHORTENER_TEST_DATABASE_URL not set; skipping integration test")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

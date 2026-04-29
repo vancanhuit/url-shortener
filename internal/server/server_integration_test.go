@@ -45,7 +45,7 @@ func startServer(t *testing.T) (string, func()) {
 		t.Fatalf("listen: %v", err)
 	}
 
-	srv := server.New(cfg, logger, nil)
+	srv := server.New(cfg, logger, server.Deps{})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
