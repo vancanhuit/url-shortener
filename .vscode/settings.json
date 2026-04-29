@@ -1,0 +1,11 @@
+{
+  // Make gopls aware of files gated behind the `integration` build tag so
+  // that internal/store/*_integration_test.go is fully analyzed in the IDE.
+  // Mirrors what `just test-integration` passes to `go test`.
+  "gopls": {
+    "build.buildFlags": ["-tags=integration"]
+  },
+  // VS Code Go extension reads this for `go test`, `go vet`, etc.
+  "go.buildTags": "integration",
+  "go.testTags": "integration"
+}
