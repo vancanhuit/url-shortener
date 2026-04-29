@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/vancanhuit/url-shortener/internal/store"
 )
 
