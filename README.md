@@ -41,8 +41,10 @@ just down        # tear it down (also removes volumes)
 ./bin/url-shortener version       # print version / commit / build date
 ./bin/url-shortener version --json
 ./bin/url-shortener config        # print resolved config (secrets redacted)
-./bin/url-shortener run           # start the HTTP server (stub: wired up in a later phase)
-./bin/url-shortener migrate up    # run database migrations (stub: wired up in a later phase)
+./bin/url-shortener run           # start the HTTP server (graceful shutdown on SIGINT/SIGTERM)
+./bin/url-shortener migrate up    # apply pending database migrations
+./bin/url-shortener migrate down  # roll back the most recent migration
+./bin/url-shortener migrate status
 ```
 
 ## Configuration
@@ -64,6 +66,19 @@ local `compose.yaml` overrides them for development.
 Run `url-shortener config` to print the fully resolved configuration with
 passwords replaced by `REDACTED`.
 
+## Operational endpoints
+
+The HTTP server exposes three operational endpoints:
+
+| Endpoint    | Purpose                          | Behaviour                                                                                     |
+| ----------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
+| `/healthz`  | Liveness probe                   | Always returns `200` + `{"status":"ok"}` while the process is responsive. No dependencies.    |
+| `/readyz`   | Readiness probe                  | Pings every registered dependency. Returns `200` when all are healthy, `503` otherwise.       |
+| `/version`  | Build metadata                   | Returns `{"version":"...","commit":"...","date":"..."}` baked into the binary at build time.  |
+
+`/readyz` currently checks Postgres (when `URL_SHORTENER_DATABASE_URL` is
+set). Redis will be added when the cache lands.
+
 ## Layout (target)
 
 Directories marked _(present)_ already exist on `main`; the rest are added in
@@ -75,13 +90,13 @@ internal/
   cli/                    cobra commands (run, migrate, version, config) (present)
   config/                 viper-based env config loader                   (present)
   buildinfo/              version / commit / date set via -ldflags        (present)
-  server/                 echo setup, middleware, lifecycle
-  handlers/               http handlers (json api + html + health)
+  server/                 echo setup, middleware, lifecycle              (present)
+  handlers/               http handlers (operational; json api + html added later) (present)
   shortener/              short-code generation
-  store/                  pgx-based repository
+  store/                  pgx-based repository                           (present)
   cache/                  redis client wrapper
-  migrate/                goose runner over embedded SQL
-migrations/               goose .sql migrations (//go:embed)
+  migrate/                goose runner over embedded SQL                 (present)
+migrations/               goose .sql migrations (//go:embed)             (present)
 web/templates/            html/template files
 web/static/               static assets (incl. compiled tailwind css)
 web/tailwind/             tailwind v4 toolchain (npm)
