@@ -18,6 +18,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 
+	"github.com/vancanhuit/url-shortener/internal/cache"
 	"github.com/vancanhuit/url-shortener/internal/config"
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 	"github.com/vancanhuit/url-shortener/internal/store"
@@ -33,28 +34,39 @@ const (
 	shutdownTimeout   = 15 * time.Second
 )
 
+// Deps groups the optional runtime dependencies the server needs. Each
+// field may be nil; the server gracefully degrades (e.g. /readyz simply
+// omits checks for missing deps).
+type Deps struct {
+	Store *store.Store
+	Cache *cache.Client
+}
+
 // Server is the HTTP server with its dependencies and lifecycle.
 type Server struct {
 	cfg    config.Config
 	logger *slog.Logger
-	store  *store.Store
+	deps   Deps
 	echo   *echo.Echo
 	http   *http.Server
 }
 
 // New builds a Server with all routes and middleware mounted. It does not
 // start listening; call Run for that.
-func New(cfg config.Config, logger *slog.Logger, st *store.Store) *Server {
+func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	e := echo.New()
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
 	e.Use(slogRequestLogger(logger))
 
 	op := handlers.NewOperational()
-	if st != nil {
+	if deps.Store != nil {
 		op.AddReadinessCheck("postgres", func(ctx context.Context) error {
-			return st.Pool().Ping(ctx)
+			return deps.Store.Pool().Ping(ctx)
 		})
+	}
+	if deps.Cache != nil {
+		op.AddReadinessCheck("redis", deps.Cache.Ping)
 	}
 	op.Mount(e)
 
@@ -67,7 +79,7 @@ func New(cfg config.Config, logger *slog.Logger, st *store.Store) *Server {
 		IdleTimeout:       idleTimeout,
 	}
 
-	return &Server{cfg: cfg, logger: logger, store: st, echo: e, http: httpSrv}
+	return &Server{cfg: cfg, logger: logger, deps: deps, echo: e, http: httpSrv}
 }
 
 // Run starts the HTTP server and blocks until ctx is cancelled (typically by

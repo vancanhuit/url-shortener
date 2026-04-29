@@ -47,6 +47,13 @@ type Config struct {
 	// RedisURL is a Redis connection string. Sensitive: redacted by
 	// Redacted() and by the JSON marshaller.
 	RedisURL string `mapstructure:"redis_url"    json:"redis_url"`
+
+	// AutoMigrate, when true, makes `run` apply pending migrations before
+	// starting the HTTP server. Convenient for local dev and CI where there
+	// is exactly one process; production deployments should keep this false
+	// and run `migrate up` as a separate one-shot step (avoids races between
+	// replicas).
+	AutoMigrate bool `mapstructure:"auto_migrate" json:"auto_migrate"`
 }
 
 // Load reads the configuration from environment variables and applies the
@@ -62,7 +69,7 @@ func Load() (Config, error) {
 	// key has no default (notably log_format, whose default depends on env).
 	for _, key := range []string{
 		"env", "addr", "base_url", "log_level", "log_format",
-		"database_url", "redis_url",
+		"database_url", "redis_url", "auto_migrate",
 	} {
 		_ = v.BindEnv(key)
 	}

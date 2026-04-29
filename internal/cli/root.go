@@ -41,6 +41,7 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(),
 		newRunCmd(),
 		newMigrateCmd(),
+		newHealthcheckCmd(),
 	)
 	return cmd
 }
