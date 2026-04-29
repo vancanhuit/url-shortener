@@ -68,3 +68,38 @@ jobs:
       # same name above documents the expected pin.
       - name: just lint
         run: just lint
+
+  go-integration:
+    name: go (integration)
+    runs-on: ubuntu-latest
+    # Service containers can't reference workflow env vars in the `image:` field
+    # directly; the value is hard-coded below and kept in sync via review.
+    services:
+      postgres:
+        image: postgres:18.3-trixie
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: url_shortener
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      URL_SHORTENER_DATABASE_URL: postgres://postgres:postgres@localhost:5432/url_shortener?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: extractions/setup-just@v2
+      - name: just build
+        run: just build
+      - name: apply migrations
+        run: ./bin/url-shortener migrate up
+      - name: just test-integration
+        run: just test-integration
