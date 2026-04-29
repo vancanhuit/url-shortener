@@ -1,40 +1,21 @@
-# Local development stack.
+# Local development & integration-test stack.
 #
-# Phase 2 scope: bring up Postgres + Redis healthy, plus the api container
-# (which currently exits cleanly because the binary is still a stub --
-# subcommands like `run` and `migrate` are added in later phases).
+# Default profile: brings up just `db` and `redis`. This is what the
+# integration tests use (the test process runs from the host and applies
+# migrations via the binary directly), and also what you want when
+# iterating on Go code natively (`./bin/url-shortener run` on the host).
 #
-# Reverse proxy (Caddy) is added in Phase 5 once the HTTP server exists.
+# `dev` profile: adds the `server` container, which runs the binary in
+# `run` mode. URL_SHORTENER_AUTO_MIGRATE=true makes it apply pending
+# migrations before serving. Production deploys should leave AUTO_MIGRATE
+# off and run `migrate up` as a separate one-shot step.
+#
+# Tear down with `docker compose down -v` -- `down` ignores profiles so
+# this cleans up regardless of how the stack was started.
 
 name: url-shortener
 
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        VERSION: dev
-        COMMIT: dev
-    image: url-shortener:dev
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      URL_SHORTENER_ADDR: ":8080"
-      URL_SHORTENER_ENV: dev
-      URL_SHORTENER_LOG_LEVEL: debug
-      URL_SHORTENER_LOG_FORMAT: text
-      URL_SHORTENER_DATABASE_URL: postgres://postgres:postgres@db:5432/url_shortener?sslmode=disable
-      URL_SHORTENER_REDIS_URL: redis://redis:6379/0
-      URL_SHORTENER_BASE_URL: http://localhost:8080
-    ports:
-      - "8080:8080"
-    # The binary is still a stub; restarting on exit would loop forever.
-    restart: "no"
-
   db:
     image: postgres:18.3-trixie
     environment:
@@ -63,6 +44,48 @@ services:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # `server`: runs the binary in `run` mode. With AUTO_MIGRATE=true it
+  # applies pending migrations before opening the listener, so the stack
+  # is fully ready as soon as `up --wait` returns. Only in the `dev`
+  # profile -- integration tests don't go through HTTP so they bring up
+  # only db+redis and exercise the binary directly from the host.
+  server:
+    profiles: ["dev"]
+    image: url-shortener:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+        COMMIT: dev
+    command: ["run"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      URL_SHORTENER_ADDR: ":8080"
+      URL_SHORTENER_ENV: dev
+      URL_SHORTENER_LOG_LEVEL: debug
+      URL_SHORTENER_LOG_FORMAT: text
+      URL_SHORTENER_DATABASE_URL: postgres://postgres:postgres@db:5432/url_shortener?sslmode=disable
+      URL_SHORTENER_REDIS_URL: redis://redis:6379/0
+      URL_SHORTENER_BASE_URL: http://localhost:8080
+      URL_SHORTENER_AUTO_MIGRATE: "true"
+    ports:
+      - "8080:8080"
+    # Distroless has no curl/wget; the binary's `healthcheck` subcommand
+    # probes its own /healthz so docker / `up --wait` can tell when the
+    # server is actually accepting requests (rather than just "container
+    # started").
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/url-shortener", "healthcheck"]
       interval: 5s
       timeout: 3s
       retries: 10

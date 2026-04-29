@@ -13,6 +13,11 @@ PLATFORMS              := "linux/amd64,linux/arm64"
 # env var defined in .github/workflows/ci.yaml so there is a single source of
 # truth per run; the literal here is the default for local development.
 GOLANGCI_LINT_VERSION  := env("GOLANGCI_LINT_VERSION", "2.11.4")
+# URLs the integration tests connect to. They point at the host-mapped ports
+# of the compose-managed db and redis (see compose.yaml). CI overrides them
+# via the same-named env vars in the workflow.
+TEST_DATABASE_URL      := env("URL_SHORTENER_TEST_DATABASE_URL", "postgres://postgres:postgres@localhost:5432/url_shortener?sslmode=disable")
+TEST_REDIS_URL         := env("URL_SHORTENER_TEST_REDIS_URL",    "redis://localhost:6379/0")
 
 LDFLAGS := "-s -w" + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=" + VERSION + \
@@ -52,11 +57,15 @@ version:
 test:
     go test -race -v -cover ./...
 
-# Run unit + integration tests. Integration tests are gated by build tag and
-# typically also by env vars (e.g. URL_SHORTENER_DATABASE_URL); they skip
-# cleanly when the dependency isn't reachable.
-test-integration:
-    go test -race -v -cover -tags=integration ./...
+# Run the integration suite end-to-end. Brings up infra (db + redis),
+# applies migrations against the test database, and runs the build-tagged
+# tests with the URL_SHORTENER_TEST_* env vars set. Tear down with `just
+# down` when you're done.
+test-integration: up build
+    ./bin/url-shortener migrate up --database-url '{{TEST_DATABASE_URL}}'
+    URL_SHORTENER_TEST_DATABASE_URL='{{TEST_DATABASE_URL}}' \
+    URL_SHORTENER_TEST_REDIS_URL='{{TEST_REDIS_URL}}' \
+        go test -race -v -cover -tags=integration ./...
 
 # Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into $GOPATH/bin.
 # Idempotent: a no-op when the right version is already present.
@@ -134,12 +143,24 @@ docker-buildx PUSH="false":
         {{ if PUSH == "true" { "--push" } else { "--output=type=image,push=false" } }} \
         .
 
-# Bring up the local stack (db + redis + api). Builds the api image first.
+# Bring up infra (db + redis) only. This is what integration tests use:
+# the test process runs from the host, applying migrations via the binary
+# and connecting to host-mapped service ports. Use `just dev` for the full
+# Docker stack including the server container.
 up:
-    docker compose up --build -d
+    docker compose up --wait -d
     docker compose ps
 
-# Tear down the local stack and remove volumes.
+# Bring up the full dev stack via the `dev` profile: db + redis + the
+# server container. The server has URL_SHORTENER_AUTO_MIGRATE=true so it
+# applies migrations before opening the listener; `--wait` blocks until
+# all three are healthy.
+dev:
+    docker compose --profile dev up --build --wait -d
+    docker compose ps
+
+# Tear down the local stack and remove volumes. `down` ignores profiles by
+# default, so this cleans up regardless of how the stack was started.
 down:
     docker compose down -v
 
