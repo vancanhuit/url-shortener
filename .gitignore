@@ -11,7 +11,10 @@ coverage.html
 
 # Editor / OS
 .idea/
-.vscode/
+.vscode/*
+# Track shared editor settings so gopls/lint behave consistently for everyone.
+!.vscode/settings.json
+!.vscode/extensions.json
 .DS_Store
 *.swp
 
