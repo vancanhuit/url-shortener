@@ -65,11 +65,43 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_LOG_LEVEL`      | `info`                        | One of `debug`, `info`, `warn`, `error`.            |
 | `URL_SHORTENER_LOG_FORMAT`     | `text` in dev, `json` in prod | `text` (human-readable) or `json` (structured).     |
 | `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | Postgres connection string. Redacted when printed.  |
-| `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | Redis connection string. Redacted when printed.     |
+| `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | **Required.** Redis connection string. Redacted when printed.   |
 | `URL_SHORTENER_AUTO_MIGRATE`   | `false`                       | When `true`, `run` applies migrations before serving. Convenient for local dev / single-replica CI; production deployments should leave this off and run `migrate up` as a separate step. |
+| `URL_SHORTENER_CODE_LENGTH`    | `7`                           | Length of auto-generated short codes (base62). Must be in [4, 64]. |
 
 Run `url-shortener config` to print the fully resolved configuration with
 passwords replaced by `REDACTED`.
+
+## API
+
+```http
+POST /api/v1/links
+Content-Type: application/json
+
+{"target_url": "https://example.com/...", "code": "optional"}
+```
+
+Response `201 Created`:
+
+```json
+{
+  "code": "a1B2c3D",
+  "short_url": "https://your.host/r/a1B2c3D",
+  "target_url": "https://example.com/...",
+  "created_at": "2026-04-30T06:48:00Z"
+}
+```
+
+| Endpoint                  | Purpose                                                              |
+| ------------------------- | -------------------------------------------------------------------- |
+| `POST /api/v1/links`      | Create a link. Auto-generates a base62 code, or accepts a user one.  |
+| `GET  /api/v1/links/:code`| Fetch link metadata as JSON.                                         |
+| `GET  /r/:code`           | 302 redirect to the link's `target_url`. Read-through Redis cache.   |
+
+Validation: `target_url` must be `http`/`https`, have a host, and be at most
+2048 characters. User-supplied codes must match `[0-9A-Za-z]{4,64}`. Status
+codes: `400` for malformed JSON, `409` for a duplicate user-supplied code,
+`422` for validation failures, `404` for unknown codes.
 
 ## Operational endpoints
 
@@ -82,8 +114,8 @@ The HTTP server exposes three operational endpoints:
 | `/version`  | Build metadata                   | Returns `{"version":"...","commit":"...","date":"..."}` baked into the binary at build time.  |
 
 `/readyz` checks Postgres (when `URL_SHORTENER_DATABASE_URL` is set) and
-Redis (when `URL_SHORTENER_REDIS_URL` is set). Each check has its own line
-in the JSON body so operators can see which dependency is unhappy.
+Redis (always required). Each check has its own line in the JSON body so
+operators can see which dependency is unhappy.
 
 ## Layout (target)
 
@@ -97,8 +129,8 @@ internal/
   config/                 viper-based env config loader                   (present)
   buildinfo/              version / commit / date set via -ldflags        (present)
   server/                 echo setup, middleware, lifecycle              (present)
-  handlers/               http handlers (operational; json api + html added later) (present)
-  shortener/              short-code generation
+  handlers/               http handlers (operational + json links api)   (present)
+  shortener/              short-code generation                          (present)
   store/                  pgx-based repository                           (present)
   cache/                  redis client wrapper                           (present)
   migrate/                goose runner over embedded SQL                 (present)
