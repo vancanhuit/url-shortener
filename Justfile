@@ -176,22 +176,28 @@ trivy-install:
             | sh -s -- -b "$gobin" "v$want"
     fi
 
-# Build the local Docker image (`url-shortener:dev`) and scan it with
-# Trivy. Complements `just vuln`: govulncheck only sees Go code, while
-# Trivy inspects the entire runtime image -- the distroless base, the
-# embedded binary, and any OS-level CPEs the registry knows about.
+# Scan an arbitrary image reference (registry tag, digest, or local
+# daemon image) with Trivy. Used by both the local `trivy-image`
+# recipe (which builds first) and the nightly-scan workflow (which
+# scans the already-published GHCR image).
 #
 # Severity gate: HIGH and CRITICAL fail the run; --ignore-unfixed
 # silences findings for which there is no upstream fix yet (we cannot
-# act on those, and they otherwise create perpetual noise). Tune this
-# in CI by overriding TRIVY_SEVERITY when the policy needs to change.
-trivy-image: trivy-install docker-build
+# act on those, and they otherwise create perpetual noise).
+trivy-scan-image IMAGE: trivy-install
     "$(go env GOPATH)/bin/trivy" image \
         --severity HIGH,CRITICAL \
         --ignore-unfixed \
         --exit-code 1 \
         --no-progress \
-        url-shortener:dev
+        {{IMAGE}}
+
+# Build the local Docker image (`url-shortener:dev`) and scan it with
+# Trivy. Complements `just vuln`: govulncheck only sees Go code, while
+# Trivy inspects the entire runtime image -- the distroless base, the
+# embedded binary, and any OS-level CPEs the registry knows about.
+trivy-image: docker-build
+    just trivy-scan-image url-shortener:dev
 
 # Tidy go.mod / go.sum.
 tidy:
