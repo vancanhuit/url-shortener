@@ -14,7 +14,10 @@
 # emitting the unsuffixed string.
 VERSION                := `git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev"`
 COMMIT                 := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
-DATE                   := `date -u +%Y-%m-%dT%H:%M:%SZ`
+# Use the committer timestamp of HEAD (in UTC, RFC3339) so two builds
+# of the same commit report identical metadata. Falls back to the
+# current wall-clock time outside a git checkout (e.g. tarball builds).
+DATE                   := `TZ=UTC git show -s --format='%cd' --date='format-local:%Y-%m-%dT%H:%M:%SZ' HEAD 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ`
 PLATFORMS              := "linux/amd64,linux/arm64"
 # golangci-lint version. CI overrides this via the GOLANGCI_LINT_VERSION
 # env var defined in .github/workflows/ci.yaml so there is a single source of
