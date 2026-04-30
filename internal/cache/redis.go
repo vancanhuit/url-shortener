@@ -3,7 +3,7 @@
 //
 // The wrapper exposes only the surface the rest of the codebase needs
 // (Get/Set/Del/Ping), which keeps the call sites stable if we later swap
-// implementations or add observability. A cache miss is signalled by the
+// implementations or add observability. A cache miss is signaled by the
 // (found=false, err=nil) tuple from Get -- never as an error -- so callers
 // don't need to know about the underlying redis.Nil sentinel.
 package cache

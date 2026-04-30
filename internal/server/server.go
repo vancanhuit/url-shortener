@@ -139,13 +139,17 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	return &Server{cfg: cfg, logger: logger, deps: deps, echo: e, http: httpSrv, links: links}
 }
 
-// Run starts the HTTP server and blocks until ctx is cancelled (typically by
+// Run starts the HTTP server and blocks until ctx is canceled (typically by
 // SIGINT/SIGTERM), at which point it performs a graceful shutdown.
 //
 // Returns nil on a clean shutdown, a non-nil error on a startup failure or a
 // shutdown that timed out.
 func (s *Server) Run(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.cfg.Addr)
+	// ListenConfig{}.Listen takes a context so net's listener-side
+	// callbacks (currently a no-op KeepAlive) can be canceled if
+	// startup gets interrupted before Serve takes over.
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", s.cfg.Addr)
 	if err != nil {
 		return fmt.Errorf("server: listen: %w", err)
 	}
@@ -153,7 +157,7 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 // Serve runs the HTTP server using the provided already-bound listener. It
-// blocks until ctx is cancelled and then shuts down gracefully. Tests use
+// blocks until ctx is canceled and then shuts down gracefully. Tests use
 // this with a port-0 listener so they can pick up the bound address.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	errCh := make(chan error, 1)
@@ -175,9 +179,13 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		s.logger.Info("http server shutting down", "reason", ctx.Err())
 	}
 
+	// Deliberately root the shutdown context at Background, not the
+	// already-canceled `ctx`: http.Server.Shutdown needs a live
+	// context to drain, and the 15s timeout is the bound we want on
+	// the stop sequence regardless of how Serve was woken.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	shutdownErr := s.http.Shutdown(shutdownCtx)
+	shutdownErr := s.http.Shutdown(shutdownCtx) //nolint:contextcheck // see comment above; fresh ctx is intentional.
 
 	// Drain background goroutines (currently just async click counter
 	// increments) before reporting shutdown complete. Any work fired
@@ -187,7 +195,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// left in shutdownCtx -- typically most of the 15s, since
 	// http.Shutdown returns as soon as the last in-flight request
 	// finishes -- so the overall stop time is still bounded.
-	if remaining := timeUntil(shutdownCtx); remaining > 0 {
+	if remaining := timeUntil(shutdownCtx); remaining > 0 { //nolint:contextcheck // shutdownCtx is intentionally fresh; see Shutdown call above.
 		if !s.links.WaitForBackgroundTasks(remaining) {
 			s.logger.Warn("background tasks did not drain before shutdown deadline",
 				"budget", remaining)
@@ -248,7 +256,7 @@ func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 			// Forward the request context so handlers like otelslog can
 			// extract the trace/span IDs the http server installed.
 			// Falls back to Background only if the request is somehow
-			// detached (e.g. tests that synthesise a logger value
+			// detached (e.g. tests that synthesize a logger value
 			// directly), which keeps the call total-safe.
 			ctx := context.Background()
 			if c != nil && c.Request() != nil {

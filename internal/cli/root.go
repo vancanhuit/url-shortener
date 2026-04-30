@@ -1,6 +1,6 @@
 // Package cli implements the cobra-based command tree for the url-shortener
 // binary. The root command does not run a server itself -- subcommands like
-// `run` and `migrate` (added in later phases) drive behaviour.
+// `run` and `migrate` (added in later phases) drive behavior.
 package cli
 
 import (

@@ -27,7 +27,7 @@ import (
 
 // startFullServer spins up a Server with a real Postgres, Redis, and code
 // generator. It skips the test when the URL_SHORTENER_TEST_* env vars are
-// unset (matching the behaviour of the per-package integration tests).
+// unset (matching the behavior of the per-package integration tests).
 func startFullServer(t *testing.T) (string, func()) {
 	t.Helper()
 
@@ -140,7 +140,7 @@ func TestLinksAPI_CreateGetRedirectFlow(t *testing.T) {
 	}
 
 	// 2. Fetch it back via the API.
-	resp, err = http.Get(base + "/api/v1/links/" + created.Code) //nolint:noctx,gosec // test helper
+	resp, err = http.Get(base + "/api/v1/links/" + created.Code)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestLinksAPI_UnknownCodeReturns404(t *testing.T) {
 	base, stop := startFullServer(t)
 	defer stop()
 
-	resp, err := http.Get(base + "/api/v1/links/zzzzzzz") //nolint:noctx,gosec // test helper
+	resp, err := http.Get(base + "/api/v1/links/zzzzzzz")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}

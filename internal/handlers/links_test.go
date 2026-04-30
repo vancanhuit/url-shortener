@@ -402,7 +402,6 @@ func TestCreate_NormalizesScheme_Host_AndDefaultPort(t *testing.T) {
 		"http://example.com/foo",
 	}
 	for _, v := range variants {
-		v := v
 		rec, body := doJSON(t, e, http.MethodPost, "/api/v1/links",
 			`{"target_url":"`+v+`"}`)
 		if rec.Code != http.StatusOK {

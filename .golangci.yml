@@ -1,5 +1,7 @@
 # golangci-lint configuration.
-# Keep the linter set small but strict; we will add more linters as the codebase grows.
+# Curated, strict-but-quiet linter set. Each entry is justified inline
+# so it's clear why a linter earns its slot in CI; remove ones that
+# produce more noise than signal rather than letting //nolint sprawl.
 version: "2"
 
 run:
@@ -9,29 +11,102 @@ run:
 linters:
   default: none
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - revive
-    - gosec
+    # Core correctness (built-in or near-built-in).
+    - errcheck       # un-checked errors are bugs in disguise.
+    - govet          # suite of compiler-adjacent vet checks.
+    - ineffassign    # detects assignments whose value is never read.
+    - staticcheck    # broad correctness + simplification checks.
+    - unused         # dead code, unused symbols.
+    - revive         # configurable replacement for golint.
+    - gosec          # security-focused static analysis.
+
+    # Resource / API misuse.
+    - bodyclose       # http.Response.Body must be closed; the redirect path and tests rely on this.
+    - noctx           # outbound HTTP without context can hang shutdown.
+    - makezero        # `make([]T, n)` then `append` is almost always a bug.
+    - durationcheck   # catches `time.Duration * time.Duration` style mistakes.
+    - forcetypeassert # bans `x.(T)` without the comma-ok form (silent panic risk).
+
+    # Error-handling discipline (matches the centralised error classification work).
+    - errorlint       # enforce errors.Is/As; flag %v on errors and direct ==.
+    - nilerr          # `if err != nil { return nil }` smells.
+    - nilnil          # returning (nil, nil) hides ambiguity.
+
+    # Context discipline. Shutdown drain + DB retries depend on the right
+    # ctx being threaded through; these two catch foot-guns the compiler
+    # cannot.
+    - contextcheck    # detects passing the wrong context (e.g. Background) to a downstream call.
+    - fatcontext      # detects ctx leaks via nested context.WithValue or accumulation in loops.
+
+    # Variadic / logging foot-guns. The slogger takes `...any`; asasalint catches
+    # accidentally passing a single `[]any` slice in place of variadic args.
+    - asasalint
+
+    # Mutation discipline.
+    - reassign        # flags reassignment of top-level package vars (e.g. sentinels).
+
+    # Style / hygiene.
+    - copyloopvar     # Go 1.22+ loop-var capture; cheap to keep on.
+    - unconvert       # redundant type conversions.
+    - misspell        # comment/string typos -- catches doc drift early.
+    - nolintlint      # validates that //nolint directives are well-formed and used.
+    - usestdlibvars   # nudges magic strings ("GET", "200") toward http.MethodGet / http.StatusOK.
+
+    # Concurrency in tests.
+    - tparallel       # flags t.Parallel() misuse.
+    - thelper         # every (*testing.T) helper must call t.Helper() so failures point at the caller.
   settings:
     revive:
       rules:
+        # Identifier conventions: MixedCaps + standard initialism list
+        # (URL, ID, HTTP, JSON, API, etc. -- not Url/Id/Http/Json/Api).
         - name: var-naming
+        # `exported` would require docstrings on every public symbol;
+        # we already write them where they pull weight, so leave the
+        # linter off rather than ratcheting against a future-tense rule.
         - name: exported
           disabled: true
+        # Every method on a type T must use the same receiver name
+        # (e.g. always `s *Server`, never sometimes `srv` or `self`).
+        - name: receiver-naming
+        # Catches package-local pairs like Foo / foo whose only
+        # difference is case -- usually a refactor accident.
+        - name: confusing-naming
+        # Flags local vars that shadow an imported package name
+        # (`var url = "..."` inside a file that imports net/url).
+        - name: import-shadowing
+        # Flags identifiers that shadow predeclared builtins like
+        # len, new, copy, error -- a classic foot-gun.
+        - name: redefines-builtin-id
+        # Bans `import . "foo"`; we never do this and the rule keeps
+        # it that way.
+        - name: dot-imports
     gosec:
       excludes:
         # G104 (errcheck duplicate) is already covered by errcheck.
         - G104
+    errorlint:
+      # Plain comparisons (`err == io.EOF`) are still idiomatic for sentinels
+      # the stdlib documents that way; we can switch this on later if we
+      # adopt our own sentinels widely.
+      comparison: false
+    nolintlint:
+      require-specific: true   # //nolint:linter1,linter2 not bare //nolint.
+      require-explanation: false
+      allow-unused: false
+    misspell:
+      locale: US
   exclusions:
     rules:
       # Test fixtures often embed fake URLs/passwords; gosec G101 noise.
+      # Tests are also free to use httptest.NewRequest / http.Get / net.Listen
+      # without a context: the calls are short-lived, in-process, and bounded
+      # by the test deadline, so the context-plumbing the noctx linter wants
+      # would be pure ceremony.
       - path: _test\.go
         linters:
           - gosec
+          - noctx
 
 formatters:
   enable:

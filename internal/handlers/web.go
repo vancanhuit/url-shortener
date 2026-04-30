@@ -89,7 +89,7 @@ func (w *Web) Mount(e *echo.Echo, staticFS fs.FS) {
 	// can't use immutable+long-max-age safely. A modest max-age plus
 	// must-revalidate keeps the round-trip cheap (304 on If-Modified-Since
 	// is moot because embed.FS reports a zero modtime, but browsers still
-	// honour the freshness window).
+	// honor the freshness window).
 	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
 	e.GET("/static/*", echo.WrapHandler(staticCacheHeaders(staticHandler)))
 }
@@ -132,14 +132,16 @@ var expiresInPresets = map[string]time.Duration{
 }
 
 // resolveExpiresIn maps a form preset to an absolute *time.Time the
-// links service understands. Returns (nil, nil) for the "never" case.
+// links service understands. Returns (nil, nil) for the "never" case;
+// the caller distinguishes "never" from "unset" by inspecting the
+// pointer, which is the same shape the JSON API uses.
 func resolveExpiresIn(preset string) (*time.Time, error) {
 	d, ok := expiresInPresets[preset]
 	if !ok {
 		return nil, errors.New("invalid expiry option")
 	}
 	if d == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // (nil, nil) deliberately encodes "never expires".
 	}
 	t := time.Now().Add(d)
 	return &t, nil
