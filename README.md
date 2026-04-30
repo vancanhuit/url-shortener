@@ -313,6 +313,35 @@ The binary embeds a `git describe` version string of the form
 so `url-shortener version` always identifies which commit produced
 a given build, regardless of where it came from.
 
+### Image attestations (SBOM + provenance)
+
+Every image published to GHCR &mdash; tagged releases, the `:edge`
+floating tag, and the per-commit `:main-<sha>` tags &mdash; ships
+with two in-toto attestations stored next to the manifest:
+
+- An **SPDX SBOM** listing every Go module, npm package, and
+  OS-level component baked into the runtime image. Useful for
+  answering "are we shipping &lt;vulnerable-dep&gt;?" without
+  rebuilding from source.
+- A **SLSA-style provenance** attestation in `max` mode that pins
+  the image digest to the workflow run, the source repo, and the
+  commit SHA that produced it.
+
+Fetch them with `docker buildx`:
+
+```sh
+docker buildx imagetools inspect ghcr.io/vancanhuit/url-shortener:v1.2.3 \
+    --format '{{ json .SBOM }}'        # or .Provenance
+
+# Pipe the SBOM straight to a vulnerability scanner:
+docker buildx imagetools inspect ghcr.io/vancanhuit/url-shortener:v1.2.3 \
+    --format '{{ json .SBOM.SPDX }}' | trivy sbom -
+```
+
+Pull-request OCI tarballs (`oci-image-pr-<N>`) carry the same
+attestations, so reviewers can run the same commands against a
+loaded image.
+
 ## License
 
 To be added.

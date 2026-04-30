@@ -326,6 +326,16 @@ jobs:
             VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta-build.outputs.date }}
+          # Attach an SPDX SBOM (sbom: true; BuildKit's default scanner
+          # emits SPDX 2.3) and SLSA-style provenance in `max` mode (full
+          # source/build-step graph) as in-toto attestations on the
+          # manifest index. Consumers fetch them with
+          # `docker buildx imagetools inspect ghcr.io/.../url-shortener:edge
+          # --format '{{ json .SBOM }}'` (or .Provenance), and downstream
+          # tools like `trivy sbom` / `cosign verify-attestation` can
+          # consume them directly without rebuilding.
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -347,6 +357,11 @@ jobs:
             VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta-build.outputs.date }}
+          # Mirror the main-only build so reviewers downloading the OCI
+          # tarball get a complete artifact: the SBOM + provenance are
+          # written into the same tarball next to the image manifests.
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
