@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v5"
 
 	"github.com/vancanhuit/url-shortener/internal/handlers"
@@ -25,12 +26,14 @@ import (
 // fakeStore implements handlers.LinkStore against an in-memory map. It also
 // records inserts so the auto-collision retry test can force collisions.
 type fakeStore struct {
-	mu       sync.Mutex
-	links    map[string]store.Link
-	clicks   map[string]int64 // separate counter so tests can poll without racing on links[]
-	nextID   int64
-	failNew  error // non-nil makes the next CreateLink return failNew
-	failList error // non-nil makes every ListLinks return failList
+	mu         sync.Mutex
+	links      map[string]store.Link
+	clicks     map[string]int64 // separate counter so tests can poll without racing on links[]
+	clickErrs  []error          // queued errors returned by IncrementClicks; popped per call. nil entries pass through to the real bump.
+	clickCalls int              // total IncrementClicks invocations (success + failure), for retry-budget assertions.
+	nextID     int64
+	failNew    error // non-nil makes the next CreateLink return failNew
+	failList   error // non-nil makes every ListLinks return failList
 }
 
 func newFakeStore() *fakeStore {
@@ -68,6 +71,14 @@ func (f *fakeStore) CreateLink(_ context.Context, _ store.DBTX, code, target str
 func (f *fakeStore) IncrementClicks(_ context.Context, _ store.DBTX, code string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.clickCalls++
+	if len(f.clickErrs) > 0 {
+		err := f.clickErrs[0]
+		f.clickErrs = f.clickErrs[1:]
+		if err != nil {
+			return err
+		}
+	}
 	f.clicks[code]++
 	if l, ok := f.links[code]; ok {
 		l.ClickCount = f.clicks[code]
@@ -696,6 +707,80 @@ func TestRedirect_IncrementsClickCount(t *testing.T) {
 	st.mu.Unlock()
 	if got != 3 {
 		t.Errorf("clicks = %d, want 3", got)
+	}
+}
+
+// TestRedirect_RetriesTransientClickFailure: a deadlock_detected on
+// the first IncrementClicks attempt must be retried (with backoff) and
+// eventually succeed; the click counter ends up incremented exactly
+// once and a non-trivial number of attempts is observed.
+func TestRedirect_RetriesTransientClickFailure(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "retried", "https://r.example", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Two transient failures, then nil (success). The click counter
+	// should still end at 1, and IncrementClicks should have been
+	// invoked exactly three times.
+	st.clickErrs = []error{
+		&pgconn.PgError{Code: "40P01", Message: "deadlock_detected"},
+		&pgconn.PgError{Code: "40001", Message: "serialization_failure"},
+		nil,
+	}
+	e, h := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	req := httptest.NewRequest(http.MethodGet, "/r/retried", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("redirect status = %d", rec.Code)
+	}
+	if !h.WaitForBackgroundTasks(2 * time.Second) {
+		t.Fatal("click goroutine did not complete in time (retry budget exceeded?)")
+	}
+
+	st.mu.Lock()
+	calls, count := st.clickCalls, st.clicks["retried"]
+	st.mu.Unlock()
+	if calls != 3 {
+		t.Errorf("IncrementClicks calls = %d, want 3 (initial + two retries)", calls)
+	}
+	if count != 1 {
+		t.Errorf("click count = %d, want 1", count)
+	}
+}
+
+// TestRedirect_DoesNotRetryNonTransientClickFailure: a non-pg error
+// (or one with a non-retryable SQLSTATE) must NOT be retried. The
+// counter stays at zero and exactly one attempt is recorded.
+func TestRedirect_DoesNotRetryNonTransientClickFailure(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "noretry", "https://n.example", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	st.clickErrs = []error{errors.New("some other error")}
+	e, h := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	req := httptest.NewRequest(http.MethodGet, "/r/noretry", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("redirect status = %d", rec.Code)
+	}
+	if !h.WaitForBackgroundTasks(2 * time.Second) {
+		t.Fatal("click goroutine did not complete in time")
+	}
+
+	st.mu.Lock()
+	calls, count := st.clickCalls, st.clicks["noretry"]
+	st.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("IncrementClicks calls = %d, want 1 (no retry on non-transient)", calls)
+	}
+	if count != 0 {
+		t.Errorf("click count = %d, want 0 (failed increment must not bump counter)", count)
 	}
 }
 
