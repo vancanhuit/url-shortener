@@ -233,8 +233,28 @@ jobs:
       - name: Derive image tags + labels
         id: meta
         uses: docker/metadata-action@v6
+        env:
+          # Write annotations onto both the multi-arch manifest index
+          # AND each per-platform manifest. GHCR's package UI reads the
+          # description (and other OCI fields) from the index for
+          # multi-arch images, so leaving annotations at the default
+          # ("manifest" only) leaves the registry page blank even though
+          # the per-platform configs carry the same labels via
+          # Dockerfile LABEL.
+          # Docs: https://github.com/docker/metadata-action#annotations
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
+          # Static OCI fields are also baked into the Dockerfile so
+          # `docker build` outside CI inherits them; restating them
+          # here is what populates the `annotations` output that the
+          # build-push-action step consumes.
+          labels: |
+            org.opencontainers.image.title=url-shortener
+            org.opencontainers.image.description=A small URL-shortener service with a JSON API and HTMX web UI.
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=vancanhuit
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}#readme
           tags: |
             type=ref,event=pr
             type=raw,value=edge,enable={{is_default_branch}}
@@ -249,6 +269,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Annotations cover the manifest index for GHCR's UI; labels
+          # cover the per-platform image configs for `docker inspect`.
+          annotations: ${{ steps.meta.outputs.annotations }}
           build-args: |
             VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
@@ -269,6 +292,7 @@ jobs:
           outputs: type=oci,dest=./url-shortener-oci.tar
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           build-args: |
             VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}

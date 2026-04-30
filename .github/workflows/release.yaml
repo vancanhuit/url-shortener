@@ -102,8 +102,23 @@ jobs:
       - name: Derive image tags + labels
         id: meta
         uses: docker/metadata-action@v6
+        env:
+          # Annotate both the manifest index and per-platform manifests
+          # so GHCR's package UI surfaces description/source/etc. for
+          # the multi-arch image. See ci.yaml's image job for the full
+          # rationale.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Static OCI fields are also baked into the Dockerfile; this
+          # block exists so docker/metadata-action emits them as part
+          # of the `annotations` output consumed below.
+          labels: |
+            org.opencontainers.image.title=url-shortener
+            org.opencontainers.image.description=A small URL-shortener service with a JSON API and HTMX web UI.
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=vancanhuit
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}#readme
           tags: |
             type=ref,event=tag
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
@@ -116,6 +131,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Annotations populate the manifest index that GHCR's UI
+          # reads; labels populate the per-platform image configs.
+          annotations: ${{ steps.meta.outputs.annotations }}
           build-args: |
             VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
