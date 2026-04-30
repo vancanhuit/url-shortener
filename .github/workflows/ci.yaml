@@ -62,7 +62,7 @@ jobs:
     steps:
       # fetch-depth: 0 so `just build` -> `git describe` can resolve the
       # version string against the most recent tag, producing meaningful
-      # `1.2.3-N-gSHA` ldflags on PR/main builds instead of the bare SHA.
+      # `v1.2.3-N-gSHA` ldflags on PR/main builds instead of the bare SHA.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # fetch-depth: 0 so the version baked into each binary reflects
-      # the distance from the most recent tag (e.g. `1.2.3-5-gabcdef0`).
+      # the distance from the most recent tag (e.g. `v1.2.3-5-gabcdef0`).
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -200,7 +200,7 @@ jobs:
       packages: write
     steps:
       # fetch-depth: 0 so the version build-arg picked up below reflects
-      # the distance from the most recent tag (e.g. `1.2.3-5-gabcdef0`),
+      # the distance from the most recent tag (e.g. `v1.2.3-5-gabcdef0`),
       # not just the bare commit SHA.
       - uses: actions/checkout@v6
         with:
@@ -209,7 +209,7 @@ jobs:
       - name: Resolve version from git
         id: version
         run: |
-          version=$(git describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null | sed -E 's/^v//' || echo "0.0.0-dev")
+          version=$(git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Resolved VERSION=$version"
 

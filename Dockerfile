@@ -42,7 +42,7 @@ ARG TARGETOS
 ARG TARGETARCH
 
 # Build metadata injected via -ldflags.
-ARG VERSION=0.0.0-dev
+ARG VERSION=v0.0.0-dev
 ARG COMMIT=unknown
 ARG DATE=1970-01-01T00:00:00Z
 

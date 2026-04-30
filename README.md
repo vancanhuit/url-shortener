@@ -233,9 +233,10 @@ Pushing a `v*` semver tag triggers `.github/workflows/release.yaml` and
 publishes:
 
 - **Container images** to `ghcr.io/vancanhuit/url-shortener` for
-  linux/amd64 + linux/arm64. Tags: `:1.2.3`, `:1.2`, `:1`, plus
-  `:latest` on stable (non-prerelease) tags. Pre-releases like
-  `v1.2.3-beta1` publish only `:1.2.3-beta1` and don't move `:latest`.
+  linux/amd64 + linux/arm64. Image tags match the git tag verbatim:
+  pushing `v1.2.3` publishes `:v1.2.3`, and stable (non-prerelease)
+  tags also move `:latest`. Pre-releases like `v1.2.3-beta1`
+  publish only `:v1.2.3-beta1` and don't move `:latest`.
 - **Binary archives** `url-shortener_<version>_<os>_<arch>.tar.gz` for
   linux + darwin on both architectures, attached to the matching
   GitHub Release alongside `SHA256SUMS`.

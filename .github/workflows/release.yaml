@@ -4,8 +4,11 @@
 # Produces, in parallel where it can:
 #
 #   1. A multi-arch (linux/amd64 + linux/arm64) container image published
-#      to GHCR under tags :MAJOR, :MAJOR.MINOR, :MAJOR.MINOR.PATCH and
-#      :latest (the latter only on stable, non-prerelease tags).
+#      to GHCR under :<git-tag> (e.g. :v1.2.3, :v1.2.3-beta1) and
+#      :latest (the latter only on stable, non-prerelease tags). The
+#      image tag matches the git tag verbatim, including the leading
+#      `v`, so a `git checkout v1.2.3` and `docker pull ...:v1.2.3`
+#      reference the same artifact by the same name.
 #
 #   2. Cross-compiled binary archives for linux/{amd64,arm64} and
 #      darwin/{amd64,arm64} plus a SHA256SUMS file, uploaded as GitHub
@@ -59,12 +62,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Strip the leading `v` from the tag so the binary's `version`
-      # subcommand reports semver-canonical "1.2.3" rather than "v1.2.3".
+      # Use the git tag verbatim (with leading `v`) as the version
+      # string so the binary's `version` subcommand, the docker image
+      # tag, and the GitHub tag all report the exact same identifier.
       # Done as a step so the value is reusable in build-args below.
       - name: Resolve version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -76,10 +80,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # docker/metadata-action turns `refs/tags/v1.2.3` into the
-      # canonical set of semver image tags (1.2.3, 1.2, 1, latest).
+      # Image tag set: the git tag verbatim plus :latest on stable
+      # releases. `type=ref,event=tag` echoes refs/tags/<X> as :<X>,
+      # so pushing v1.2.3 publishes :v1.2.3 (matching the git tag
+      # 1:1). We deliberately don't emit rolling :MAJOR / :MAJOR.MINOR
+      # tags -- they're noisy for a small project, and a stable
+      # "track the latest 1.x" pointer is exactly what :latest is for
+      # once a major is the current line.
+      #
       # `:latest` is moved only on stable (non-prerelease) tags, so
-      # pushing v1.2.3-beta1 publishes :1.2.3-beta1 without touching
+      # pushing v1.2.3-beta1 publishes :v1.2.3-beta1 without touching
       # the stable pointer. The dev counterpart (:edge) is moved by
       # the ci.yaml `image` job on every main push.
       - name: Derive image tags + labels
@@ -88,9 +98,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=ref,event=tag
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push multi-arch image
@@ -135,10 +143,9 @@ jobs:
       - uses: extractions/setup-just@v4
 
       # The Justfile reads VERSION from `git describe --tags`, which on a
-      # tag push reports e.g. `1.2.3` (the leading `v` is stripped by the
-      # sed pipe in the Justfile). The release-binaries recipe emits
-      # url-shortener_${VERSION}_${os}_${arch}.tar.gz under ./dist along
-      # with SHA256SUMS.
+      # tag push reports e.g. `v1.2.3` verbatim. The release-binaries
+      # recipe emits url-shortener_${VERSION}_${os}_${arch}.tar.gz
+      # under ./dist along with SHA256SUMS.
       - name: Build release binaries
         run: just release-binaries
 
