@@ -14,9 +14,36 @@
 <li class="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 ring-1 ring-slate-200">
   <a href="{{.ShortURL}}" target="_blank" rel="noopener"
      class="font-mono text-indigo-600 hover:underline shrink-0">{{.ShortURL}}</a>
-  <span class="truncate text-sm text-slate-500">{{.TargetURL}}</span>
+  <span class="truncate text-sm text-slate-500 flex-1">{{.TargetURL}}</span>
+  {{template "recent-badges" .}}
 </li>
 {{end}}
+{{end}}
+
+{{/*
+  recent-badges is the per-row metadata fragment (click count + expiry
+  hint). It re-fetches itself every 5s via HTMX and replaces itself
+  outerHTML, so the swap target and the polling trigger live on the
+  same element. The endpoint returns the same fragment shape, so the
+  loop is self-perpetuating without any client-side state.
+*/}}
+{{define "recent-badges"}}
+<span id="badges-{{.Code}}"
+      class="shrink-0 inline-flex items-center gap-2 text-xs"
+      hx-get="/links/{{.Code}}/badges"
+      hx-trigger="every 5s"
+      hx-swap="outerHTML">
+  <span class="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600"
+        title="{{.ClickCount}} click{{plural .ClickCount}}">
+    {{.ClickCount}} click{{plural .ClickCount}}
+  </span>
+  {{with humanExpiry .ExpiresAt}}
+  <span class="rounded-full px-2 py-0.5 font-medium
+               {{if eq . "expired"}}bg-rose-100 text-rose-700{{else}}bg-amber-100 text-amber-700{{end}}">
+    {{.}}
+  </span>
+  {{end}}
+</span>
 {{end}}
 
 {{define "recent-pagination"}}

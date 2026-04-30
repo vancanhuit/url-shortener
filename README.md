@@ -94,7 +94,11 @@ passwords replaced by `REDACTED`.
 POST /api/v1/links
 Content-Type: application/json
 
-{"target_url": "https://example.com/...", "code": "optional"}
+{
+  "target_url": "https://example.com/...",
+  "code":       "optional",
+  "expires_at": "2026-05-01T00:00:00Z"
+}
 ```
 
 Response `201 Created` for a freshly minted code, `200 OK` when an existing
@@ -102,12 +106,21 @@ row was reused (see Deduplication below):
 
 ```json
 {
-  "code": "a1B2c3D",
-  "short_url": "https://your.host/r/a1B2c3D",
-  "target_url": "https://example.com/...",
-  "created_at": "2026-04-30T06:48:00Z"
+  "code":        "a1B2c3D",
+  "short_url":   "https://your.host/r/a1B2c3D",
+  "target_url":  "https://example.com/...",
+  "created_at":  "2026-04-30T06:48:00Z",
+  "click_count": 0,
+  "expires_at":   "2026-05-01T00:00:00Z"
 }
 ```
+
+`expires_at` is omitted from the response for permanent links (instead
+of rendered as `null`), so a one-key check distinguishes them. The
+field is RFC3339 in both directions; absent or `null` on the request
+means "never expires". `click_count` is the lifetime hit count for
+the redirect endpoint, bumped fire-and-forget on each successful
+`/r/:code` so it never delays the 302.
 
 | Endpoint                  | Purpose                                                              |
 | ------------------------- | -------------------------------------------------------------------- |
@@ -116,9 +129,14 @@ row was reused (see Deduplication below):
 | `GET  /r/:code`           | 302 redirect to the link's `target_url`. Read-through Redis cache.   |
 
 Validation: `target_url` must be `http`/`https`, have a host, and be at most
-2048 characters. User-supplied codes must match `[0-9A-Za-z]{4,64}`. Status
-codes: `400` for malformed JSON, `409` for a duplicate user-supplied code,
-`422` for validation failures, `404` for unknown codes.
+2048 characters. User-supplied codes must match `[0-9A-Za-z]{4,64}`.
+`expires_at`, when supplied, must be in the future (a 30s grace window
+absorbs honest client/server clock skew). Status codes: `400` for
+malformed JSON, `409` for a duplicate user-supplied code, `422` for
+validation failures, `404` for unknown codes, `410 Gone` for an
+expired code (returned by both `GET /api/v1/links/:code` and
+`GET /r/:code` -- distinct from `404` so clients can tell a once-valid
+code from one that never existed).
 
 ### Deduplication
 
@@ -138,16 +156,30 @@ already present elsewhere -- two codes can legitimately point at the same
 destination. Dedup is best-effort under concurrent writes (no unique
 constraint on `target_url`).
 
+Dedup is also suppressed whenever expiry is involved on either side: a
+request carrying `expires_at` always mints a fresh code (so an
+ephemeral request never silently extends a permanent row's lifetime),
+and the dedup lookup excludes rows that themselves have a non-null
+`expires_at` (so a permanent request never reuses an expiring row).
+
 ## Web UI
 
 The binary serves a small HTML UI at `/`:
 
-- A paste-URL form with optional custom code, posted via HTMX so success
-  and error states swap inline without a page reload.
-- A copy-to-clipboard button on the result panel.
+- A paste-URL form with optional custom code and an Expires select
+  (Never / 1h / 1d / 7d / 30d), posted via HTMX so success and error
+  states swap inline without a page reload.
+- A copy-to-clipboard button on the result panel, plus an inline
+  expiry hint when one was set.
 - A "Recent" list backed by Postgres, paginated cursor-style via the
-  `id DESC` order. The Load more button fetches `/recent?before=<id>`
-  and HTMX appends rows + replaces the cursor.
+  `id DESC` order. Each row carries a click-count badge and (when
+  applicable) an `expires in Nh / Nd left` / `expired` badge.
+  - Each row's badges self-poll `GET /links/:code/badges` every 5
+    seconds via HTMX and swap themselves outerHTML, so click counts
+    and expiry labels refresh live without disturbing siblings or
+    rows that were appended via *Load more*.
+  - The *Load more* button fetches `/recent?before=<id>` and HTMX
+    appends rows + replaces the cursor.
 
 Static assets are served under `/static/` from the embedded FS:
 
