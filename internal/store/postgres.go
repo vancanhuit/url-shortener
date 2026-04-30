@@ -27,7 +27,7 @@ var ErrCodeTaken = errors.New("store: code already taken")
 // uniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
 const uniqueViolation = "23505"
 
-// Transient SQLSTATE codes recognised by IsTransient. The list is
+// Transient SQLSTATE codes recognized by IsTransient. The list is
 // intentionally narrow: every entry must describe a failure that is
 // safe to retry against an idempotent statement without changing the
 // observed semantics. We deliberately exclude
@@ -339,7 +339,7 @@ func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, 
 // handler layer. Multiple permanent rows can legally share a target
 // (a user-supplied code is allowed even when an auto-generated row
 // already covers the same target), so we deliberately pick the oldest
-// by id ASC for stable behaviour.
+// by id ASC for stable behavior.
 //
 // Returns ErrNotFound when no row matches.
 func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL string) (Link, error) {

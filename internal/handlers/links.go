@@ -193,7 +193,7 @@ const (
 	ErrCodeInternal        = "internal_error"    // 500 for any other failure.
 )
 
-// errResp builds an ErrorResponse with both fields set. Centralised so
+// errResp builds an ErrorResponse with both fields set. Centralized so
 // every call site is forced to provide a code, preventing the public
 // shape from drifting back into "human message only".
 func errResp(code, msg string) ErrorResponse {
@@ -273,7 +273,7 @@ func (h *Links) ClassifyPersistError(op string, err error) (kind PersistErrorKin
 //
 // Note: dedup is best-effort. Two simultaneous requests for the same new
 // target may both miss the lookup and both insert; this is no worse than
-// today's behaviour and avoids needing a unique constraint that would
+// today's behavior and avoids needing a unique constraint that would
 // conflict with user-supplied-code semantics.
 func (h *Links) Persist(ctx context.Context, target, userCode string, expiresAt *time.Time) (link store.Link, created bool, err error) {
 	if err := validateTargetURL(target); err != nil {

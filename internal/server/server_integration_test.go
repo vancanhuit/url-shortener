@@ -26,7 +26,7 @@ func waitForReady(t *testing.T, url string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(url) //nolint:gosec,noctx // test helper, controlled URL
+		resp, err := http.Get(url)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -40,7 +40,7 @@ func waitForReady(t *testing.T, url string) {
 
 func getJSON(t *testing.T, url string) (int, map[string]any) {
 	t.Helper()
-	resp, err := http.Get(url) //nolint:gosec,noctx // test helper.
+	resp, err := http.Get(url)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}

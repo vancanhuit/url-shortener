@@ -13,7 +13,7 @@ import (
 // TestIsTransient walks every SQLSTATE class we care about so the
 // classifier can't silently widen or narrow without flipping a test.
 // Uses external_test (store_test) intentionally: IsTransient is part
-// of the package's public surface and behaviour.
+// of the package's public surface and behavior.
 func TestIsTransient(t *testing.T) {
 	t.Parallel()
 
