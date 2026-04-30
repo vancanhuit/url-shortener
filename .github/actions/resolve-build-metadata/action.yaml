@@ -1,0 +1,53 @@
+name: Resolve build metadata
+description: >-
+  Resolve the version string and build date injected into the binary via
+  ldflags and forwarded to the Docker image as build-args. Both image jobs
+  (ci.yaml on main/PR, release.yaml on tag pushes) need the same values
+  derived the same way; this action is the single source of truth.
+
+inputs:
+  version-source:
+    description: >-
+      Where the version string comes from:
+        - "describe": run `git describe --tags --always --dirty=-dev
+          --match 'v[0-9]*'`, falling back to `v0.0.0-dev`. Used on PR and
+          main-branch builds where there's no exact tag.
+        - "tag": use $GITHUB_REF_NAME verbatim (with leading `v`). Used on
+          tag-push releases so the binary, image tag, and git tag all
+          report the same identifier.
+    required: false
+    default: describe
+
+outputs:
+  version:
+    description: Resolved version string (e.g. v1.2.3 or v1.2.3-5-gabcdef0-dev).
+    value: ${{ steps.resolve.outputs.version }}
+  date:
+    description: >-
+      Build date as RFC3339 UTC, taken from the committer timestamp of HEAD.
+      Reproducible across re-runs of the same SHA, human-readable on the
+      `version` subcommand.
+    value: ${{ steps.resolve.outputs.date }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      run: |
+        case "${{ inputs.version-source }}" in
+          tag)
+            version="${GITHUB_REF_NAME}"
+            ;;
+          describe)
+            version=$(git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev")
+            ;;
+          *)
+            echo "unknown version-source: ${{ inputs.version-source }}" >&2
+            exit 1
+            ;;
+        esac
+        date=$(TZ=UTC git show -s --format='%cd' --date='format-local:%Y-%m-%dT%H:%M:%SZ' HEAD)
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "date=$date" >> "$GITHUB_OUTPUT"
+        echo "Resolved VERSION=$version DATE=$date"

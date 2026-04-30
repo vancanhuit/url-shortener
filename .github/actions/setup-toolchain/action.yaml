@@ -1,0 +1,41 @@
+name: Set up toolchain
+description: >-
+  Install the Go, Node, and just toolchains used by every build/test/release
+  job. Centralizes the action versions, cache config, and Node-24 opt-in so
+  workflow jobs can stay focused on what they actually run.
+
+inputs:
+  go-version:
+    description: Go toolchain version to install (e.g. 1.26.2).
+    required: true
+  node-version:
+    description: Node.js version to install (e.g. 24.14.1).
+    required: true
+  go-cache:
+    description: >-
+      Whether actions/setup-go should manage the build/module cache.
+      Set to "false" for short-lived jobs that don't benefit from it.
+    required: false
+    default: "true"
+  node-cache-dependency-path:
+    description: >-
+      Lockfile path forwarded to actions/setup-node's `cache-dependency-path`.
+      Defaults to the Tailwind/htmx toolchain that `just web-build` consumes.
+    required: false
+    default: web/tailwind/package-lock.json
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v6
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: ${{ inputs.go-cache }}
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: ${{ inputs.node-cache-dependency-path }}
+
+    - uses: extractions/setup-just@v4
