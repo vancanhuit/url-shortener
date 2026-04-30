@@ -2,10 +2,17 @@
 # Run `just` (or `just help`) to list recipes.
 
 # Resolve the version string from git tags, matching the documented scheme:
-#   git describe --tags --always --dirty --match 'v[0-9]*'
-# Tags themselves start with `v`; the binary's version string strips that prefix
-# when the working tree is on an exact tag.
-VERSION                := `git describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null | sed -E 's/^v//' || echo "0.0.0-dev"`
+#   git describe --tags --always --dirty=-dev --match 'v[0-9]*'
+# The leading `v` is preserved so the binary's `version` subcommand prints
+# the same string as the git tag and the docker image tag (e.g. `v1.2.3`),
+# making it trivial to map a deployed binary back to the source revision.
+#
+# `--dirty=-dev` overrides the default `-dirty` mark with `-dev`, so a
+# local build off a tagged commit with uncommitted edits reports e.g.
+# `v1.2.3-dev` -- a clearer "this is a developer build" signal than the
+# bare git terminology, while CI runs (always clean checkouts) keep
+# emitting the unsuffixed string.
+VERSION                := `git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev"`
 COMMIT                 := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
 DATE                   := `date -u +%Y-%m-%dT%H:%M:%SZ`
 PLATFORMS              := "linux/amd64,linux/arm64"
@@ -202,7 +209,7 @@ docker-build:
 #
 # Usage:
 #   just release-binaries           # uses {{VERSION}}
-#   just release-binaries 1.2.3     # explicit version override
+#   just release-binaries v1.2.3    # explicit version override
 release-binaries V=VERSION: web-build
     #!/usr/bin/env bash
     set -euo pipefail

@@ -7,7 +7,7 @@ package buildinfo
 //
 //nolint:gochecknoglobals // intentional: linker-injected metadata.
 var (
-	version = "0.0.0-dev"
+	version = "v0.0.0-dev"
 	commit  = "unknown"
 	date    = "1970-01-01T00:00:00Z"
 )
