@@ -42,6 +42,10 @@ env:
   NODE_VERSION: 24.14.1
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Opt every JS-based action into the Node 24 runtime ahead of the
+  # June 2026 deadline. Mirrors ci.yaml; see that file for the full
+  # rationale.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   image:
@@ -51,7 +55,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -111,7 +115,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -122,7 +126,7 @@ jobs:
 
       # `just release-binaries` depends on `just web-build`, which runs
       # `npm ci` in web/tailwind/. Same setup pattern as the ci workflow.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm

@@ -26,6 +26,12 @@ env:
   NODE_VERSION: 24.14.1
   GOLANGCI_LINT_VERSION: 2.11.4
   REGISTRY: ghcr.io
+  # Opt every JS-based action into the Node 24 runtime ahead of the
+  # June 2026 deadline. Some third-party actions we depend on (e.g.
+  # extractions/setup-just) haven't cut a Node 24 release yet; this
+  # flag lets us run them on the newer runtime today without waiting.
+  # See: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   commitlint:
@@ -35,8 +41,8 @@ jobs:
     # commits, and the squash-merge produces a fresh conventional commit.
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -57,7 +63,7 @@ jobs:
       # fetch-depth: 0 so `just build` -> `git describe` can resolve the
       # version string against the most recent tag, producing meaningful
       # `1.2.3-N-gSHA` ldflags on PR/main builds instead of the bare SHA.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v5
@@ -67,7 +73,7 @@ jobs:
       # `just build` depends on `web-build`, which `npm ci`s the Tailwind +
       # htmx toolchain in web/tailwind/ and emits the .gitignore'd assets
       # the Go binary embeds. Cache is keyed on the tailwind lockfile.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -88,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Same fetch-depth: 0 reasoning as the `go` job above.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v5
@@ -97,7 +103,7 @@ jobs:
           cache: true
       # Same setup-node story as the `go` job: `just test-integration`
       # depends on `build`, which depends on `web-build` (npm ci).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -128,14 +134,14 @@ jobs:
     steps:
       # fetch-depth: 0 so the version baked into each binary reflects
       # the distance from the most recent tag (e.g. `1.2.3-5-gabcdef0`).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -176,7 +182,7 @@ jobs:
       # fetch-depth: 0 so the version build-arg picked up below reflects
       # the distance from the most recent tag (e.g. `1.2.3-5-gabcdef0`),
       # not just the bare commit SHA.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
