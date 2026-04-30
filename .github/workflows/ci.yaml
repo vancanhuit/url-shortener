@@ -110,6 +110,35 @@ jobs:
       - name: just vuln
         run: just vuln
 
+  trivy:
+    name: trivy (image scan)
+    runs-on: ubuntu-latest
+    # Don't burn a runner scanning a broken build; gating on `go`
+    # ensures the binary at least compiles before we wrap it in a
+    # container and look for OS-level CVEs.
+    needs: go
+    steps:
+      - uses: actions/checkout@v6
+      # `just trivy-image` calls `just docker-build`, which calls
+      # `just web-build` (npm). The toolchain composite gets us Go +
+      # Node + a primed npm cache, identical to the `go` job.
+      - uses: ./.github/actions/setup-toolchain
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+      # Build the host-arch image and scan it with Trivy. The recipe
+      # installs trivy at the version pinned in the Justfile
+      # (TRIVY_VERSION) into $GOPATH/bin -- the same self-install
+      # pattern used for golangci-lint -- so we avoid the
+      # aquasecurity/trivy-action third-party action that was
+      # compromised in the March-2026 supply-chain incident.
+      #
+      # The recipe gates on HIGH/CRITICAL severities and passes
+      # --ignore-unfixed; bump the gate (or add a TRIVY_SEVERITY
+      # override here) when the policy changes.
+      - name: just trivy-image
+        run: just trivy-image
+
   go-integration:
     name: go (integration)
     runs-on: ubuntu-latest
