@@ -87,7 +87,7 @@ test:
 # URLs are hard-coded against the `test`-profile services in compose.yaml
 # (db-test on host port 5433, redis-test on 6380); update both files
 # together if those ports ever change.
-test-integration: build
+test-integration:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -95,7 +95,6 @@ test-integration: build
     export URL_SHORTENER_TEST_REDIS_URL='redis://localhost:6380/0'
 
     docker compose --profile=test up --wait --detach db-test redis-test
-    ./bin/url-shortener migrate up --database-url "$URL_SHORTENER_TEST_DATABASE_URL"
     go test -race -v -cover -tags=integration ./...
 
 # Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into $GOPATH/bin.

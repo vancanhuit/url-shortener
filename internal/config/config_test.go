@@ -11,7 +11,9 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	clearEnv(t)
-	// Redis is a required field; set the minimum needed for Load() to succeed.
+	// Postgres + Redis are required fields; set the minimum needed for
+	// Load() to succeed.
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 
 	cfg, err := config.Load()
@@ -39,6 +41,7 @@ func TestLoad_Defaults(t *testing.T) {
 func TestLoad_DevDefaultsLogFormatToText(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("URL_SHORTENER_ENV", "dev")
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 
 	cfg, err := config.Load()
@@ -85,6 +88,7 @@ func TestLoad_EnvOverrides(t *testing.T) {
 
 func TestLoad_DBPoolEnvOverrides(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("URL_SHORTENER_DB_MAX_CONNS", "32")
 	t.Setenv("URL_SHORTENER_DB_MIN_CONNS", "4")
@@ -117,11 +121,15 @@ func TestLoad_DBPoolEnvOverrides(t *testing.T) {
 func TestValidate_RejectsBadDBPoolValues(t *testing.T) {
 	t.Parallel()
 
-	const redisOK = "redis://localhost:6379/0"
+	const (
+		redisURL    = "redis://localhost:6379/0"
+		databaseURL = "postgres://u:p@h:5432/db"
+	)
 	base := func() config.Config {
 		return config.Config{
 			Env: "prod", Addr: ":8080", BaseURL: "x",
-			LogLevel: "info", LogFormat: "json", RedisURL: redisOK,
+			LogLevel: "info", LogFormat: "json",
+			DatabaseURL: databaseURL, RedisURL: redisURL,
 		}
 	}
 
@@ -151,16 +159,21 @@ func TestValidate_RejectsBadDBPoolValues(t *testing.T) {
 func TestValidate_RejectsBadValues(t *testing.T) {
 	t.Parallel()
 
-	// Every case sets a non-empty RedisURL so the failure is attributable to
-	// the field under test, except for the dedicated empty-redis case.
-	const redisOK = "redis://localhost:6379/0"
+	// Every case sets non-empty DatabaseURL + RedisURL so the failure is
+	// attributable to the field under test, except for the dedicated
+	// empty-database-url and empty-redis-url cases.
+	const (
+		redisURL    = "redis://localhost:6379/0"
+		databaseURL = "postgres://u:p@h:5432/db"
+	)
 	cases := map[string]config.Config{
-		"bad env":         {Env: "staging", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", RedisURL: redisOK},
-		"bad log_level":   {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "trace", LogFormat: "json", RedisURL: redisOK},
-		"bad log_format":  {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "yaml", RedisURL: redisOK},
-		"empty addr":      {Env: "prod", Addr: "", BaseURL: "x", LogLevel: "info", LogFormat: "json", RedisURL: redisOK},
-		"empty baseurl":   {Env: "prod", Addr: ":8080", BaseURL: "", LogLevel: "info", LogFormat: "json", RedisURL: redisOK},
-		"empty redis_url": {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", RedisURL: ""},
+		"bad env":            {Env: "staging", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: redisURL},
+		"bad log_level":      {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "trace", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: redisURL},
+		"bad log_format":     {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "yaml", DatabaseURL: databaseURL, RedisURL: redisURL},
+		"empty addr":         {Env: "prod", Addr: "", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: redisURL},
+		"empty baseurl":      {Env: "prod", Addr: ":8080", BaseURL: "", LogLevel: "info", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: redisURL},
+		"empty database_url": {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: "", RedisURL: redisURL},
+		"empty redis_url":    {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: ""},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

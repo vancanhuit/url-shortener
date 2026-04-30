@@ -32,31 +32,25 @@ func newRunCmd() *cobra.Command {
 			}
 			logger.Info("starting url-shortener", "env", cfg.Env, "addr", cfg.Addr)
 
-			// Database and cache are both optional: /healthz answers without
-			// either, and /readyz simply omits checks for missing deps. This
-			// keeps first-boot smoke tests friendly.
-			var st *store.Store
-			if cfg.DatabaseURL != "" {
-				if cfg.AutoMigrate {
-					logger.Info("auto_migrate=true; applying migrations before serving")
-					if err := migrate.Up(cmd.Context(), cfg.DatabaseURL); err != nil {
-						return err
-					}
-				}
-				st, err = store.NewWithPool(cmd.Context(), cfg.DatabaseURL, store.PoolConfig{
-					MaxConns:          cfg.DBMaxConns,
-					MinConns:          cfg.DBMinConns,
-					MaxConnLifetime:   cfg.DBMaxConnLifetime,
-					MaxConnIdleTime:   cfg.DBMaxConnIdleTime,
-					HealthCheckPeriod: cfg.DBHealthCheckPeriod,
-				})
-				if err != nil {
+			// Postgres is a required runtime dependency (enforced by
+			// config.Validate); DatabaseURL is guaranteed non-empty here.
+			if cfg.AutoMigrate {
+				logger.Info("auto_migrate=true; applying migrations before serving")
+				if err := migrate.Up(cmd.Context(), cfg.DatabaseURL); err != nil {
 					return err
 				}
-				defer st.Close()
-			} else {
-				logger.Warn("URL_SHORTENER_DATABASE_URL is empty; running without a database")
 			}
+			st, err := store.NewWithPool(cmd.Context(), cfg.DatabaseURL, store.PoolConfig{
+				MaxConns:          cfg.DBMaxConns,
+				MinConns:          cfg.DBMinConns,
+				MaxConnLifetime:   cfg.DBMaxConnLifetime,
+				MaxConnIdleTime:   cfg.DBMaxConnIdleTime,
+				HealthCheckPeriod: cfg.DBHealthCheckPeriod,
+			})
+			if err != nil {
+				return err
+			}
+			defer st.Close()
 
 			// Redis is a required dependency (enforced by config.Validate),
 			// so RedisURL is guaranteed to be non-empty here.

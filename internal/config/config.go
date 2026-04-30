@@ -148,6 +148,12 @@ func (c Config) Validate() error {
 	if _, err := url.Parse(c.BaseURL); err != nil {
 		return fmt.Errorf("config: base_url is not a valid URL: %w", err)
 	}
+	// Postgres is a required runtime dependency: the link store is the
+	// system of record. Refuse to start instead of booting a server that
+	// would 500 on every request.
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("config: database_url must not be empty")
+	}
 	// Redis is a required runtime dependency: the cache is on the hot path
 	// for redirect lookups and the API treats it as always-present. Refuse
 	// to start instead of silently degrading.
