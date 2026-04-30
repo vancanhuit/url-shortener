@@ -45,10 +45,12 @@ const (
 	maxRequestBodyBytes = 16 * 1024
 )
 
-// Deps groups the optional runtime dependencies the server needs. Each
-// field may be nil; the server gracefully degrades (e.g. /readyz simply
-// omits checks for missing deps and the links API is not mounted when
-// Store is missing).
+// Deps groups the runtime dependencies the server needs. Every field is
+// required: Postgres is the system of record, Redis is on the redirect
+// hot path, and Generator mints short codes for new links. New panics
+// if any field is nil -- there is no meaningful "degraded" mode for a
+// link shortener that is missing one of them, and silently mounting a
+// half-wired server would only manifest as 500s in production.
 type Deps struct {
 	Store     *store.Store
 	Cache     *cache.Client
@@ -63,16 +65,25 @@ type Server struct {
 	echo   *echo.Echo
 	http   *http.Server
 
-	// links is the constructed handler bundle (or nil when the
-	// caller didn't supply enough deps to mount it). Held on the
-	// server so Serve can drain its background goroutines during
-	// graceful shutdown.
+	// links is the constructed handler bundle. Held on the server
+	// so Serve can drain its background goroutines (async click
+	// counter increments) during graceful shutdown.
 	links *handlers.Links
 }
 
 // New builds a Server with all routes and middleware mounted. It does not
-// start listening; call Run for that.
+// start listening; call Run for that. Panics if any field of deps is nil
+// (see Deps for rationale).
 func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
+	switch {
+	case deps.Store == nil:
+		panic("server: Deps.Store must not be nil")
+	case deps.Cache == nil:
+		panic("server: Deps.Cache must not be nil")
+	case deps.Generator == nil:
+		panic("server: Deps.Generator must not be nil")
+	}
+
 	e := echo.New()
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
@@ -86,45 +97,35 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	e.Use(middleware.BodyLimit(maxRequestBodyBytes))
 
 	op := handlers.NewOperational()
-	if deps.Store != nil {
-		op.AddReadinessCheck("postgres", func(ctx context.Context) error {
-			return deps.Store.Pool().Ping(ctx)
-		})
-	}
-	if deps.Cache != nil {
-		op.AddReadinessCheck("redis", deps.Cache.Ping)
-	}
+	op.AddReadinessCheck("postgres", func(ctx context.Context) error {
+		return deps.Store.Pool().Ping(ctx)
+	})
+	op.AddReadinessCheck("redis", deps.Cache.Ping)
 	op.Mount(e)
 
-	// Links API + redirect: requires the full set of deps. Cache is
-	// non-optional -- the handler treats it as always-present (config
-	// validation guarantees URL_SHORTENER_REDIS_URL is set in production).
-	// The HTML web UI (form + recent list) is mounted alongside whenever
-	// the API is up; both reuse the same underlying *handlers.Links.
-	var links *handlers.Links
-	if deps.Store != nil && deps.Cache != nil && deps.Generator != nil {
-		links = handlers.NewLinks(handlers.LinksConfig{
-			Store:     deps.Store,
-			Cache:     deps.Cache,
-			Generator: deps.Generator,
-			BaseURL:   cfg.BaseURL,
-			Logger:    logger,
-		})
-		links.Mount(e)
+	// Links API + redirect, plus the HTML web UI (form + recent list)
+	// mounted alongside; both reuse the same underlying *handlers.Links.
+	links := handlers.NewLinks(handlers.LinksConfig{
+		Store:     deps.Store,
+		Cache:     deps.Cache,
+		Generator: deps.Generator,
+		BaseURL:   cfg.BaseURL,
+		Logger:    logger,
+	})
+	links.Mount(e)
 
-		tmpl, err := web.ParseTemplates()
-		if err != nil {
-			// Templates ship inside the binary, so a parse failure means
-			// a programming error: fail fast at startup.
-			panic(fmt.Errorf("server: parse web templates: %w", err))
-		}
-		webH := handlers.NewWeb(handlers.WebConfig{
-			Links:     links,
-			Templates: tmpl,
-			Logger:    logger,
-		})
-		webH.Mount(e, web.Static())
+	tmpl, err := web.ParseTemplates()
+	if err != nil {
+		// Templates ship inside the binary, so a parse failure means
+		// a programming error: fail fast at startup.
+		panic(fmt.Errorf("server: parse web templates: %w", err))
 	}
+	webH := handlers.NewWeb(handlers.WebConfig{
+		Links:     links,
+		Templates: tmpl,
+		Logger:    logger,
+	})
+	webH.Mount(e, web.Static())
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
@@ -186,13 +187,10 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// left in shutdownCtx -- typically most of the 15s, since
 	// http.Shutdown returns as soon as the last in-flight request
 	// finishes -- so the overall stop time is still bounded.
-	if s.links != nil {
-		remaining := timeUntil(shutdownCtx)
-		if remaining > 0 {
-			if !s.links.WaitForBackgroundTasks(remaining) {
-				s.logger.Warn("background tasks did not drain before shutdown deadline",
-					"budget", remaining)
-			}
+	if remaining := timeUntil(shutdownCtx); remaining > 0 {
+		if !s.links.WaitForBackgroundTasks(remaining) {
+			s.logger.Warn("background tasks did not drain before shutdown deadline",
+				"budget", remaining)
 		}
 	}
 

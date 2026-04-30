@@ -80,7 +80,7 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_BASE_URL`       | `http://localhost:8080`       | Public origin used when building short-link URLs.   |
 | `URL_SHORTENER_LOG_LEVEL`      | `info`                        | One of `debug`, `info`, `warn`, `error`.            |
 | `URL_SHORTENER_LOG_FORMAT`     | `text` in dev, `json` in prod | `text` (human-readable) or `json` (structured).     |
-| `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | Postgres connection string. Redacted when printed.  |
+| `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | **Required.** Postgres connection string. Redacted when printed. |
 | `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | **Required.** Redis connection string. Redacted when printed.   |
 | `URL_SHORTENER_AUTO_MIGRATE`   | `false`                       | When `true`, `run` applies migrations before serving. Convenient for local dev / single-replica CI; production deployments should leave this off and run `migrate up` as a separate step. |
 | `URL_SHORTENER_CODE_LENGTH`    | `7`                           | Length of auto-generated short codes (base62). Must be in [4, 64]. |
@@ -226,9 +226,11 @@ The HTTP server exposes three operational endpoints:
 | `/readyz`   | Readiness probe                  | Pings every registered dependency. Returns `200` when all are healthy, `503` otherwise.       |
 | `/version`  | Build metadata                   | Returns `{"version":"...","commit":"...","date":"..."}` baked into the binary at build time.  |
 
-`/readyz` checks Postgres (when `URL_SHORTENER_DATABASE_URL` is set) and
-Redis (always required). Each check has its own line in the JSON body so
-operators can see which dependency is unhappy.
+`/readyz` pings Postgres and Redis -- both are mandatory runtime
+dependencies (`config.Validate` rejects an empty
+`URL_SHORTENER_DATABASE_URL` or `URL_SHORTENER_REDIS_URL` at startup).
+Each check has its own line in the JSON body so operators can see
+which dependency is unhappy.
 
 ## Layout (target)
 

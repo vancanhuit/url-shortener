@@ -12,63 +12,14 @@ package server_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"testing"
 	"time"
-
-	"github.com/vancanhuit/url-shortener/internal/config"
-	"github.com/vancanhuit/url-shortener/internal/server"
 )
-
-// startServer spins up a Server bound to 127.0.0.1:0 in a background
-// goroutine. It returns the base URL ("http://127.0.0.1:PORT") and a stop
-// function that cancels the run context and waits for graceful shutdown.
-func startServer(t *testing.T) (string, func()) {
-	t.Helper()
-
-	cfg := config.Config{
-		Env:       config.EnvDev,
-		Addr:      "127.0.0.1:0", // unused by Serve(), but kept for completeness
-		BaseURL:   "http://127.0.0.1",
-		LogLevel:  "info",
-		LogFormat: "text",
-	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-
-	srv := server.New(cfg, logger, server.Deps{})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- srv.Serve(ctx, ln) }()
-
-	stop := func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("Serve returned error: %v", err)
-			}
-		case <-time.After(20 * time.Second):
-			t.Error("Serve did not return within 20s of cancellation")
-		}
-	}
-
-	// Wait briefly for the listener goroutine to start accepting.
-	waitForReady(t, "http://"+ln.Addr().String()+"/healthz")
-
-	return "http://" + ln.Addr().String(), stop
-}
 
 // waitForReady polls /healthz until it returns 200 or the deadline expires.
 func waitForReady(t *testing.T, url string) {
@@ -109,7 +60,7 @@ func getJSON(t *testing.T, url string) (int, map[string]any) {
 }
 
 func TestServer_OperationalEndpointsOverRealNetwork(t *testing.T) {
-	base, stop := startServer(t)
+	base, stop := startFullServer(t)
 	defer stop()
 
 	t.Run("healthz", func(t *testing.T) {
@@ -123,7 +74,9 @@ func TestServer_OperationalEndpointsOverRealNetwork(t *testing.T) {
 	})
 
 	t.Run("readyz", func(t *testing.T) {
-		// No checks registered -> 200.
+		// Postgres + Redis checks are registered against the real
+		// dependencies wired in startFullServer; both should be
+		// reachable in the test environment, so /readyz returns 200.
 		code, body := getJSON(t, base+"/readyz")
 		if code != http.StatusOK {
 			t.Errorf("status = %d, want 200", code)
@@ -154,7 +107,7 @@ func TestServer_OperationalEndpointsOverRealNetwork(t *testing.T) {
 }
 
 func TestServer_RejectsOversizedRequestBody(t *testing.T) {
-	base, stop := startServer(t)
+	base, stop := startFullServer(t)
 	defer stop()
 
 	// 1 MiB of payload is two orders of magnitude over the 16 KiB cap;
@@ -182,7 +135,7 @@ func TestServer_RejectsOversizedRequestBody(t *testing.T) {
 }
 
 func TestServer_GracefulShutdownClosesListener(t *testing.T) {
-	base, stop := startServer(t)
+	base, stop := startFullServer(t)
 
 	// Verify the server is responsive.
 	if code, _ := getJSON(t, base+"/healthz"); code != http.StatusOK {
