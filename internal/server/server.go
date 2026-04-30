@@ -62,6 +62,12 @@ type Server struct {
 	deps   Deps
 	echo   *echo.Echo
 	http   *http.Server
+
+	// links is the constructed handler bundle (or nil when the
+	// caller didn't supply enough deps to mount it). Held on the
+	// server so Serve can drain its background goroutines during
+	// graceful shutdown.
+	links *handlers.Links
 }
 
 // New builds a Server with all routes and middleware mounted. It does not
@@ -95,8 +101,9 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	// validation guarantees URL_SHORTENER_REDIS_URL is set in production).
 	// The HTML web UI (form + recent list) is mounted alongside whenever
 	// the API is up; both reuse the same underlying *handlers.Links.
+	var links *handlers.Links
 	if deps.Store != nil && deps.Cache != nil && deps.Generator != nil {
-		links := handlers.NewLinks(handlers.LinksConfig{
+		links = handlers.NewLinks(handlers.LinksConfig{
 			Store:     deps.Store,
 			Cache:     deps.Cache,
 			Generator: deps.Generator,
@@ -128,7 +135,7 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		IdleTimeout:       idleTimeout,
 	}
 
-	return &Server{cfg: cfg, logger: logger, deps: deps, echo: e, http: httpSrv}
+	return &Server{cfg: cfg, logger: logger, deps: deps, echo: e, http: httpSrv, links: links}
 }
 
 // Run starts the HTTP server and blocks until ctx is cancelled (typically by
@@ -169,11 +176,47 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := s.http.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("server: shutdown: %w", err)
+	shutdownErr := s.http.Shutdown(shutdownCtx)
+
+	// Drain background goroutines (currently just async click counter
+	// increments) before reporting shutdown complete. Any work fired
+	// from a request that landed before Shutdown() drew the curtain
+	// gets a chance to commit; without this drain SIGTERM can drop
+	// the last few clicks every deploy. We use whatever budget is
+	// left in shutdownCtx -- typically most of the 15s, since
+	// http.Shutdown returns as soon as the last in-flight request
+	// finishes -- so the overall stop time is still bounded.
+	if s.links != nil {
+		remaining := timeUntil(shutdownCtx)
+		if remaining > 0 {
+			if !s.links.WaitForBackgroundTasks(remaining) {
+				s.logger.Warn("background tasks did not drain before shutdown deadline",
+					"budget", remaining)
+			}
+		}
+	}
+
+	if shutdownErr != nil {
+		return fmt.Errorf("server: shutdown: %w", shutdownErr)
 	}
 	s.logger.Info("http server stopped")
 	return nil
+}
+
+// timeUntil returns the duration left until ctx's deadline, or 0 when
+// the deadline has already passed (or no deadline is set, in which
+// case there's no budget to allocate to drain). Split out so the
+// shutdown path stays readable.
+func timeUntil(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0
+	}
+	remaining := time.Until(deadline)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // slogRequestLogger returns Echo middleware that logs each request via slog.
