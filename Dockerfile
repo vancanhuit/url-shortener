@@ -8,11 +8,32 @@
 # nonroot, which is itself a multi-arch manifest.
 
 ARG GO_VERSION=1.26.2
+ARG NODE_VERSION=24.14.1
+
+# -----------------------------------------------------------------------------
+# Web-assets stage: compile Tailwind CSS and vendor htmx.min.js.
+# These are .gitignore'd build artifacts that the Go binary embeds via
+# `//go:embed`, so they have to exist before the Go builder runs. Pinned
+# to BUILDPLATFORM since the toolchain is JS, not arch-specific.
+# -----------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-trixie-slim AS web-builder
+
+WORKDIR /src/web
+
+# Cache npm install separately from the rest of the source tree.
+COPY web/tailwind/package.json web/tailwind/package-lock.json* ./tailwind/
+RUN --mount=type=cache,target=/root/.npm \
+    cd tailwind && npm ci
+
+# Templates feed Tailwind's content scanner; static/ is the output dir.
+COPY web/templates ./templates
+COPY web/tailwind ./tailwind
+RUN cd tailwind && npm run build
 
 # -----------------------------------------------------------------------------
 # Builder stage: cross-compile the Go binary.
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-trixie AS builder
 
 WORKDIR /src
 
@@ -32,6 +53,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY . .
+
+# Pull the compiled web assets into web/static/ before `go build` so the
+# embed directive finds styles.css and htmx.min.js.
+COPY --from=web-builder /src/web/static/styles.css   ./web/static/styles.css
+COPY --from=web-builder /src/web/static/htmx.min.js  ./web/static/htmx.min.js
+COPY --from=web-builder /src/web/static/copy.js      ./web/static/copy.js
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

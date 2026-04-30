@@ -58,6 +58,14 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      # `just build` depends on `web-build`, which `npm ci`s the Tailwind +
+      # htmx toolchain in web/tailwind/ and emits the .gitignore'd assets
+      # the Go binary embeds. Cache is keyed on the tailwind lockfile.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/tailwind/package-lock.json
       - uses: extractions/setup-just@v2
       - name: just build
         run: just build
@@ -72,23 +80,28 @@ jobs:
   go-integration:
     name: go (integration)
     runs-on: ubuntu-latest
-    env:
-      # Tests read URL_SHORTENER_TEST_* so they are decoupled from the
-      # application's runtime config (URL_SHORTENER_DATABASE_URL etc.).
-      URL_SHORTENER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/url_shortener?sslmode=disable
-      URL_SHORTENER_TEST_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      # Same setup-node story as the `go` job: `just test-integration`
+      # depends on `build`, which depends on `web-build` (npm ci).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/tailwind/package-lock.json
       - uses: extractions/setup-just@v2
-      # `just test-integration` brings up infra, builds the binary, applies
+      # `just test-integration` brings up the `test`-profile infra
+      # (db-test on 5433 + redis-test on 6380), builds the binary, applies
       # migrations against the test DB, and runs the build-tagged tests --
-      # all in one recipe so local dev and CI follow the same path.
+      # all in one recipe so local dev and CI follow the same path. The
+      # connection URLs are hardcoded inside the recipe to match
+      # compose.yaml; no per-job env overrides are needed here.
       - name: just test-integration
         run: just test-integration
-      - name: just down
+      - name: tear down test infra
         if: always()
-        run: just down
+        run: docker compose --profile=test down -v

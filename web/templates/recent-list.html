@@ -1,0 +1,42 @@
+{{define "recent-list"}}
+{{if .Items}}
+<ul id="recent-items" class="space-y-2">
+  {{template "recent-items" .Items}}
+</ul>
+{{template "recent-pagination" .}}
+{{else}}
+<p id="recent-empty" class="text-sm text-slate-500">No links yet.</p>
+{{end}}
+{{end}}
+
+{{define "recent-items"}}
+{{range .}}
+<li class="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 ring-1 ring-slate-200">
+  <a href="{{.ShortURL}}" target="_blank" rel="noopener"
+     class="font-mono text-indigo-600 hover:underline shrink-0">{{.ShortURL}}</a>
+  <span class="truncate text-sm text-slate-500">{{.TargetURL}}</span>
+</li>
+{{end}}
+{{end}}
+
+{{define "recent-pagination"}}
+<div id="recent-pagination" class="mt-3 text-center">
+  {{if .NextCursor}}
+  <button id="load-more"
+    hx-get="/recent?before={{.NextCursor}}"
+    hx-target="#recent-items"
+    hx-swap="beforeend"
+    class="text-sm text-indigo-600 hover:text-indigo-800 hover:underline">
+    Load more
+  </button>
+  {{end}}
+</div>
+{{end}}
+
+{{define "recent-page"}}
+{{template "recent-items" .Items}}
+<!-- Out-of-band: replace the pagination control with the new cursor (or empty on last page). -->
+<div hx-swap-oob="true">
+  {{template "recent-pagination" .}}
+</div>
+{{end}}

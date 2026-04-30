@@ -1,0 +1,20 @@
+{
+  "name": "url-shortener-web",
+  "private": true,
+  "description": "Tailwind v4 + HTMX 2 toolchain for the url-shortener web UI.",
+  "scripts": {
+    "ensure:dir": "node -e \"require('fs').mkdirSync('../static',{recursive:true})\"",
+    "build:css": "tailwindcss -i ./input.css -o ../static/styles.css --minify",
+    "watch:css": "tailwindcss -i ./input.css -o ../static/styles.css --watch",
+    "vendor:htmx": "node -e \"require('fs').copyFileSync('node_modules/htmx.org/dist/htmx.min.js','../static/htmx.min.js')\"",
+    "vendor:copy": "node -e \"require('fs').copyFileSync('copy.js','../static/copy.js')\"",
+    "build": "npm run ensure:dir && npm run build:css && npm run vendor:htmx && npm run vendor:copy"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.6",
+    "tailwindcss": "^4.1.6"
+  },
+  "dependencies": {
+    "htmx.org": "^2.0.4"
+  }
+}

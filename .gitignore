@@ -26,5 +26,9 @@ coverage.html
 # Node (commitlint / tailwind toolchain)
 node_modules/
 
-# Tailwind output (built in CI / Docker)
-/web/static/app.css
+# Tailwind / htmx outputs are build artifacts. The Go binary embeds them
+# via `//go:embed`, so `just build` re-runs `just web-build` whenever they
+# are missing. CI and the multi-stage Dockerfile do the same.
+/web/static/styles.css
+/web/static/htmx.min.js
+/web/static/copy.js

@@ -1,62 +1,76 @@
 # Local development & integration-test stack.
 #
-# Default profile: brings up just `db` and `redis`. This is what the
-# integration tests use (the test process runs from the host and applies
-# migrations via the binary directly), and also what you want when
-# iterating on Go code natively (`./bin/url-shortener run` on the host).
+# Default services (no profile): `db`, `redis`, and `server` -- the full
+# local dev loop on standard ports (5432 / 6379 / 8080). Bring it up with
+# `docker compose up --wait -d`. The server has AUTO_MIGRATE=true so it
+# applies pending migrations before opening the listener; production
+# deploys should leave AUTO_MIGRATE off and run `migrate up` as a
+# separate one-shot step.
 #
-# `dev` profile: adds the `server` container, which runs the binary in
-# `run` mode. URL_SHORTENER_AUTO_MIGRATE=true makes it apply pending
-# migrations before serving. Production deploys should leave AUTO_MIGRATE
-# off and run `migrate up` as a separate one-shot step.
+# `test` profile: `db-test` and `redis-test` on alternate host ports
+# (5433 / 6380) with their own volumes. Used by `just test-integration`,
+# which runs the binary from the host. Alternate ports + volumes mean
+# the dev stack and the test stack can coexist without conflict, so a
+# running dev environment doesn't have to be torn down to run the
+# integration suite.
 #
-# Tear down with `docker compose down -v` -- `down` ignores profiles so
-# this cleans up regardless of how the stack was started.
+# Tear down with `docker compose --profile test down -v` -- the
+# `--profile test` flag is required to remove the test-only services.
+# Without it, only the default-profile services are removed.
 
 name: url-shortener
 
+# --- fragments ----------------------------------------------------------------
+# YAML anchors hosted on `x-*` extension fields, merged into services with
+# `<<: *anchor`. This shares image/env/healthcheck/restart between the
+# default services and their `test`-profile twins; per-service blocks
+# below add only what differs (volumes, ports, profile).
+# Docs: https://docs.docker.com/reference/compose-file/fragments/
+
+x-postgres-base: &postgres-base
+  image: postgres:18.3-trixie
+  environment:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: url_shortener
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres -d url_shortener"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+  restart: unless-stopped
+
+x-redis-base: &redis-base
+  image: redis:8.6.2-trixie
+  command: ["redis-server", "--appendonly", "yes"]
+  healthcheck:
+    test: ["CMD", "redis-cli", "ping"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+  restart: unless-stopped
+
 services:
   db:
-    image: postgres:18.3-trixie
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: url_shortener
+    <<: *postgres-base
+    # Postgres 18+ expects a single mount at /var/lib/postgresql; the actual
+    # data dir lives in a versioned subdirectory inside it (e.g. 18/docker).
     volumes:
-      # Postgres 18+ expects a single mount at /var/lib/postgresql; the actual
-      # data dir lives in a versioned subdirectory inside it (e.g. 18/docker).
       - db_data:/var/lib/postgresql
     ports:
       - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d url_shortener"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
 
   redis:
-    image: redis:8.6.2-trixie
-    command: ["redis-server", "--appendonly", "yes"]
+    <<: *redis-base
     volumes:
       - redis_data:/data
     ports:
       - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
 
   # `server`: runs the binary in `run` mode. With AUTO_MIGRATE=true it
   # applies pending migrations before opening the listener, so the stack
-  # is fully ready as soon as `up --wait` returns. Only in the `dev`
-  # profile -- integration tests don't go through HTTP so they bring up
-  # only db+redis and exercise the binary directly from the host.
+  # is fully ready as soon as `up --wait` returns.
   server:
-    profiles: ["dev"]
-    image: url-shortener:dev
     build:
       context: .
       dockerfile: Dockerfile
@@ -91,6 +105,29 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # --- `test` profile -------------------------------------------------------
+  # Isolated db + redis for the integration suite. Reuse the same fragments
+  # as the default services so image/env/healthcheck stay in lockstep; only
+  # profile, volumes, and host ports differ.
+
+  db-test:
+    <<: *postgres-base
+    profiles: ["test"]
+    volumes:
+      - db_test_data:/var/lib/postgresql
+    ports:
+      - "5433:5432"
+
+  redis-test:
+    <<: *redis-base
+    profiles: ["test"]
+    volumes:
+      - redis_test_data:/data
+    ports:
+      - "6380:6379"
+
 volumes:
   db_data:
   redis_data:
+  db_test_data:
+  redis_test_data:

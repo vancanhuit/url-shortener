@@ -13,12 +13,6 @@ PLATFORMS              := "linux/amd64,linux/arm64"
 # env var defined in .github/workflows/ci.yaml so there is a single source of
 # truth per run; the literal here is the default for local development.
 GOLANGCI_LINT_VERSION  := env("GOLANGCI_LINT_VERSION", "2.11.4")
-# URLs the integration tests connect to. They point at the host-mapped ports
-# of the compose-managed db and redis (see compose.yaml). CI overrides them
-# via the same-named env vars in the workflow.
-TEST_DATABASE_URL      := env("URL_SHORTENER_TEST_DATABASE_URL", "postgres://postgres:postgres@localhost:5432/url_shortener?sslmode=disable")
-TEST_REDIS_URL         := env("URL_SHORTENER_TEST_REDIS_URL",    "redis://localhost:6379/0")
-
 LDFLAGS := "-s -w" + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=" + VERSION + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit="  + COMMIT  + \
@@ -40,10 +34,28 @@ init:
     fi
     npm ci
 
-# Build the binary into ./bin/url-shortener.
-build:
+# Build the binary into ./bin/url-shortener. The web UI is embedded via
+# `//go:embed`, so this recipe always re-runs `just web-build` first to
+# pick up template / CSS-class changes. Tailwind + the htmx vendor copy
+# together take ~200ms when npm deps are already installed.
+build: web-build
     mkdir -p bin
     CGO_ENABLED=0 go build -trimpath -ldflags='{{LDFLAGS}}' -o bin/url-shortener ./cmd/url-shortener
+
+# Install npm deps for the web tailwind toolchain (idempotent).
+web-install:
+    cd web/tailwind && npm ci
+
+# Compile Tailwind CSS and vendor htmx.min.js into web/static/. The Go
+# binary embeds these via `//go:embed` in web/web.go, so re-run this
+# after touching templates or CSS classes.
+web-build: web-install
+    cd web/tailwind && npm run build
+
+# Tailwind in watch mode for fast UI iteration. Requires `just up` (or
+# `just dev`) so the server is reloading the binary in another terminal.
+web-watch: web-install
+    cd web/tailwind && npm run watch:css
 
 # Run the binary locally.
 run *ARGS:
@@ -57,29 +69,41 @@ version:
 test:
     go test -race -v -cover ./...
 
-# Run the integration suite end-to-end. Brings up infra (db + redis),
-# applies migrations against the test database, and runs the build-tagged
-# tests with the URL_SHORTENER_TEST_* env vars set. Tear down with `just
-# down` when you're done.
-test-integration: up build
-    ./bin/url-shortener migrate up --database-url '{{TEST_DATABASE_URL}}'
-    URL_SHORTENER_TEST_DATABASE_URL='{{TEST_DATABASE_URL}}' \
-    URL_SHORTENER_TEST_REDIS_URL='{{TEST_REDIS_URL}}' \
-        go test -race -v -cover -tags=integration ./...
+# Run the integration suite end-to-end. Brings up the `test`-profile
+# infra (db-test + redis-test on alt ports), applies migrations against
+# the test database, and runs the build-tagged tests with the
+# URL_SHORTENER_TEST_* env vars set. Tear down with
+# `docker compose --profile test down -v` when you're done.
+# URLs are hard-coded against the `test`-profile services in compose.yaml
+# (db-test on host port 5433, redis-test on 6380); update both files
+# together if those ports ever change.
+test-integration: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    export URL_SHORTENER_TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5433/url_shortener?sslmode=disable'
+    export URL_SHORTENER_TEST_REDIS_URL='redis://localhost:6380/0'
+
+    docker compose --profile=test up --wait --detach db-test redis-test
+    ./bin/url-shortener migrate up --database-url "$URL_SHORTENER_TEST_DATABASE_URL"
+    go test -race -v -cover -tags=integration ./...
 
 # Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into $GOPATH/bin.
 # Idempotent: a no-op when the right version is already present.
 lint-install:
-    @gobin="$(go env GOPATH)/bin"; \
-    bin="$gobin/golangci-lint"; \
-    want="{{GOLANGCI_LINT_VERSION}}"; \
-    have="$([ -x "$bin" ] && "$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo none)"; \
-    if [ "$have" = "$want" ]; then \
-        echo "golangci-lint $want already installed at $bin"; \
-    else \
-        echo "installing golangci-lint $want into $gobin (have: $have)"; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    gobin="$(go env GOPATH)/bin"
+    bin="$gobin/golangci-lint"
+    want="{{GOLANGCI_LINT_VERSION}}"
+    have="$([ -x "$bin" ] && "$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo none)"
+    if [ "$have" = "$want" ]; then
+        echo "golangci-lint $want already installed at $bin"
+    else
+        echo "installing golangci-lint $want into $gobin (have: $have)"
         curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-            | sh -s -- -b "$gobin" "v$want"; \
+            | sh -s -- -b "$gobin" "v$want"
     fi
 
 # Run linters (auto-installs golangci-lint at the pinned version if missing).
@@ -87,7 +111,7 @@ lint-install:
 # (e.g. internal/store/*_integration_test.go) are linted alongside the rest.
 # `-v` makes diagnostics (active linters, build tags, exclusions, timings)
 # visible in CI logs without changing the issue output.
-lint: lint-install
+lint: lint-install web-build tidy
     "$(go env GOPATH)/bin/golangci-lint" run -v --build-tags=integration
 
 # Format code (gofumpt + goimports via golangci-lint formatters).
@@ -142,31 +166,6 @@ docker-buildx PUSH="false":
         -t url-shortener:{{VERSION}} \
         {{ if PUSH == "true" { "--push" } else { "--output=type=image,push=false" } }} \
         .
-
-# Bring up infra (db + redis) only. This is what integration tests use:
-# the test process runs from the host, applying migrations via the binary
-# and connecting to host-mapped service ports. Use `just dev` for the full
-# Docker stack including the server container.
-up:
-    docker compose up --wait -d
-    docker compose ps
-
-# Bring up the full dev stack via the `dev` profile: db + redis + the
-# server container. The server has URL_SHORTENER_AUTO_MIGRATE=true so it
-# applies migrations before opening the listener; `--wait` blocks until
-# all three are healthy.
-dev:
-    docker compose --profile dev up --build --wait -d
-    docker compose ps
-
-# Tear down the local stack and remove volumes. `down` ignores profiles by
-# default, so this cleans up regardless of how the stack was started.
-down:
-    docker compose down -v
-
-# Tail logs from all compose services (Ctrl-C to exit).
-logs *ARGS:
-    docker compose logs -f {{ARGS}}
 
 # --- CI -----------------------------------------------------------------------
 

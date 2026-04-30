@@ -1,0 +1,24 @@
+{{define "link-result"}}
+<div class="rounded-md bg-emerald-50 p-4 ring-1 ring-emerald-200">
+  <p class="text-sm font-medium text-emerald-700">Created.</p>
+  <div class="mt-2 flex items-center gap-2">
+    <input id="short-url" readonly value="{{.Link.ShortURL}}"
+      class="flex-1 rounded-md border border-emerald-200 bg-white px-3 py-2
+             font-mono text-indigo-700 select-all">
+    <button type="button"
+      data-copy-target="short-url"
+      data-copy-label="Copy"
+      class="rounded-md bg-emerald-600 px-3 py-2 text-white font-medium
+             hover:bg-emerald-500 transition-colors">
+      Copy
+    </button>
+  </div>
+  <p class="mt-2 truncate text-xs text-slate-500">&rarr; {{.Link.TargetURL}}</p>
+</div>
+
+<!-- Out-of-band swap: refresh the recent list to include the new link. The
+     payload here contains both Items and NextCursor (see linkResultData). -->
+<div id="recent" hx-swap-oob="true">
+  {{template "recent-list" .}}
+</div>
+{{end}}

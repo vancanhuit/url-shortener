@@ -102,6 +102,66 @@ func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string)
 	return l, nil
 }
 
+// ListLinks returns up to limit links ordered by id DESC (newest first).
+// When beforeID > 0, only links with id < beforeID are returned, enabling
+// stable cursor-based pagination over an append-mostly table. id is the
+// PRIMARY KEY so the ordering uses the existing btree index for free.
+//
+// limit is clamped to a sane maximum so callers can pass user-supplied
+// page sizes without worrying about runaway queries.
+func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int64) ([]Link, error) {
+	if db == nil {
+		db = s.pool
+	}
+	const maxLimit = 200
+	switch {
+	case limit <= 0:
+		return nil, nil
+	case limit > maxLimit:
+		limit = maxLimit
+	}
+
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if beforeID > 0 {
+		const q = `
+			SELECT id, code, target_url, created_at
+			FROM links
+			WHERE id < $1
+			ORDER BY id DESC
+			LIMIT $2
+		`
+		rows, err = db.Query(ctx, q, beforeID, limit)
+	} else {
+		const q = `
+			SELECT id, code, target_url, created_at
+			FROM links
+			ORDER BY id DESC
+			LIMIT $1
+		`
+		rows, err = db.Query(ctx, q, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: list links: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Link, 0, limit)
+	for rows.Next() {
+		var l Link
+		if err := rows.Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: list links: scan: %w", err)
+		}
+		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list links: rows: %w", err)
+	}
+	return out, nil
+}
+
 // GetLinkByCode looks up a link by its short code. Returns ErrNotFound when
 // the row is missing.
 func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, error) {
@@ -121,6 +181,38 @@ func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, 
 			return Link{}, ErrNotFound
 		}
 		return Link{}, fmt.Errorf("store: get link by code: %w", err)
+	}
+	return l, nil
+}
+
+// GetLinkByTargetURL returns the oldest existing link with the exact
+// target_url. Used by the API to dedupe auto-generated codes -- if the
+// caller is shortening a URL that's already in the table, return its
+// existing code instead of minting a new one. Multiple rows can legally
+// share a target (a user-supplied code is allowed even when an
+// auto-generated row already covers the same target), so we deliberately
+// pick the oldest by id ASC for stable behaviour.
+//
+// Returns ErrNotFound when no row matches.
+func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL string) (Link, error) {
+	if db == nil {
+		db = s.pool
+	}
+	const q = `
+		SELECT id, code, target_url, created_at
+		FROM links
+		WHERE target_url = $1
+		ORDER BY id ASC
+		LIMIT 1
+	`
+	var l Link
+	err := db.QueryRow(ctx, q, targetURL).
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Link{}, ErrNotFound
+		}
+		return Link{}, fmt.Errorf("store: get link by target url: %w", err)
 	}
 	return l, nil
 }

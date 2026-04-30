@@ -1,0 +1,7 @@
+/* Tailwind v4 entrypoint: a single @import pulls the engine in. The
+ * @source directive tells Tailwind which files to scan for class usage.
+ * Relative paths resolve against this file's directory.
+ */
+@import "tailwindcss";
+
+@source "../templates/**/*.html";
