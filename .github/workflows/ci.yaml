@@ -204,7 +204,12 @@ jobs:
         id: meta-build
         uses: ./.github/actions/resolve-build-metadata
 
-      - uses: docker/setup-qemu-action@v4
+      # No setup-qemu-action: every Dockerfile stage that runs commands
+      # is pinned to --platform=$BUILDPLATFORM, and the Go builder
+      # cross-compiles via GOOS/GOARCH instead of emulating the target.
+      # The runtime stage is distroless with no RUN steps, so buildx
+      # never has to execute target-arch instructions. Add QEMU back
+      # if a future change introduces a RUN in a non-BUILDPLATFORM stage.
       - uses: docker/setup-buildx-action@v4
 
       # GHCR login only on main pushes. PRs (incl. forks) skip this and

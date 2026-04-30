@@ -74,7 +74,10 @@ jobs:
         with:
           version-source: tag
 
-      - uses: docker/setup-qemu-action@v4
+      # No setup-qemu-action: see ci.yaml's image job for the rationale.
+      # Every Dockerfile stage that runs commands is pinned to
+      # --platform=$BUILDPLATFORM and the Go builder cross-compiles via
+      # GOOS/GOARCH, so buildx never has to emulate target-arch code.
       - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
