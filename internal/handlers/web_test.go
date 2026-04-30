@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -236,11 +237,52 @@ func TestWeb_PostLinksValidationErrorRendersErrorPartial(t *testing.T) {
 	}
 }
 
+func TestWeb_IndexDegradesGracefullyWhenStoreFails(t *testing.T) {
+	t.Parallel()
+	e, st := newWebSetup(t)
+	// Pre-existing data shouldn't matter -- the failure must not leak.
+	seedLinks(t, st, 3)
+	st.failList = errors.New("simulated database outage")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	// Form must still render so the user has something to interact with.
+	if !strings.Contains(body, `hx-post="/links"`) {
+		t.Errorf("form missing from degraded response")
+	}
+	// And the empty-state placeholder, since we have no items.
+	if !strings.Contains(body, "No links yet.") {
+		t.Errorf("empty-state placeholder missing from degraded response")
+	}
+}
+
+func TestWeb_StaticAssetsServeWithCacheHeader(t *testing.T) {
+	t.Parallel()
+	e, _ := newWebSetup(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/static/styles.css", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "max-age=") {
+		t.Errorf("Cache-Control = %q, want max-age=...", got)
+	}
+}
+
 func TestWeb_StaticAssetsServed(t *testing.T) {
 	t.Parallel()
 	e, _ := newWebSetup(t)
 
-	for _, p := range []string{"/static/styles.css", "/static/htmx.min.js"} {
+	for _, p := range []string{"/static/styles.css", "/static/htmx.min.js", "/static/copy.js"} {
 		req := httptest.NewRequest(http.MethodGet, p, nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)

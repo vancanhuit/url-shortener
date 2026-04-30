@@ -24,10 +24,11 @@ import (
 // fakeStore implements handlers.LinkStore against an in-memory map. It also
 // records inserts so the auto-collision retry test can force collisions.
 type fakeStore struct {
-	mu      sync.Mutex
-	links   map[string]store.Link
-	nextID  int64
-	failNew error // non-nil makes the next CreateLink return failNew
+	mu       sync.Mutex
+	links    map[string]store.Link
+	nextID   int64
+	failNew  error // non-nil makes the next CreateLink return failNew
+	failList error // non-nil makes every ListLinks return failList
 }
 
 func newFakeStore() *fakeStore {
@@ -86,9 +87,14 @@ func (f *fakeStore) GetLinkByTargetURL(_ context.Context, _ store.DBTX, targetUR
 
 // ListLinks returns the stored links sorted by id descending, mirroring
 // the production ordering. beforeID, when > 0, filters to ids < beforeID.
+// When failList is set, every call returns that error -- used to verify
+// graceful degradation when the database is unavailable.
 func (f *fakeStore) ListLinks(_ context.Context, _ store.DBTX, limit int, beforeID int64) ([]store.Link, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failList != nil {
+		return nil, f.failList
+	}
 	all := make([]store.Link, 0, len(f.links))
 	for _, l := range f.links {
 		if beforeID > 0 && l.ID >= beforeID {
@@ -341,6 +347,14 @@ func TestCreate_NormalizesScheme_Host_AndDefaultPort(t *testing.T) {
 	}
 	canonical := decodeLink(t, body)
 
+	// The canonical row's stored target_url must already be the
+	// normalised form, regardless of how it was originally posted.
+	// Without this the dedup lookup would silently miss on subsequent
+	// variants that *do* get normalised.
+	if canonical.TargetURL != "http://example.com/foo" {
+		t.Errorf("canonical target_url = %q, want canonical normalised form", canonical.TargetURL)
+	}
+
 	// Each variation should normalize to the canonical form and dedup.
 	variants := []string{
 		"HTTP://Example.COM/foo",
@@ -358,6 +372,10 @@ func TestCreate_NormalizesScheme_Host_AndDefaultPort(t *testing.T) {
 		got := decodeLink(t, body)
 		if got.Code != canonical.Code {
 			t.Errorf("variant %q: code = %q, want %q", v, got.Code, canonical.Code)
+		}
+		if got.TargetURL != canonical.TargetURL {
+			t.Errorf("variant %q: target_url = %q, want canonical %q",
+				v, got.TargetURL, canonical.TargetURL)
 		}
 	}
 }
