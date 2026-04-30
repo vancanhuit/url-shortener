@@ -62,13 +62,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Use the git tag verbatim (with leading `v`) as the version
-      # string so the binary's `version` subcommand, the docker image
-      # tag, and the GitHub tag all report the exact same identifier.
-      # Done as a step so the value is reusable in build-args below.
-      - name: Resolve version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+      # Resolve VERSION (git tag verbatim, including leading `v`) and
+      # DATE (committer timestamp of HEAD, RFC3339 UTC) via the shared
+      # composite. ci.yaml uses the same composite with the default
+      # `version-source: describe` so the binary's `version` subcommand,
+      # the Docker image tag, and the git tag all report the same
+      # identifier on tag pushes.
+      - name: Resolve build metadata
+        id: meta-build
+        uses: ./.github/actions/resolve-build-metadata
+        with:
+          version-source: tag
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -110,9 +114,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
-            DATE=${{ github.event.repository.pushed_at }}
+            DATE=${{ steps.meta-build.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -127,20 +131,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      # `just release-binaries` depends on `just web-build`, which runs
+      # `npm ci` in web/tailwind/. Same composite as ci.yaml.
+      - uses: ./.github/actions/setup-toolchain
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      # `just release-binaries` depends on `just web-build`, which runs
-      # `npm ci` in web/tailwind/. Same setup pattern as the ci workflow.
-      - uses: actions/setup-node@v6
-        with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/tailwind/package-lock.json
-
-      - uses: extractions/setup-just@v4
 
       # The Justfile reads VERSION from `git describe --tags`, which on a
       # tag push reports e.g. `v1.2.3` verbatim. The release-binaries

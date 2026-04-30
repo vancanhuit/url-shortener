@@ -42,11 +42,16 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      # commitlint runs `just init`, which `npm ci`s the root toolchain
+      # (husky + @commitlint/*). Point the npm cache at the root lockfile
+      # rather than the Tailwind one, and skip the Go module cache since
+      # this job never invokes the Go toolchain.
+      - uses: ./.github/actions/setup-toolchain
         with:
+          go-version: ${{ env.GO_VERSION }}
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - uses: extractions/setup-just@v4
+          go-cache: "false"
+          node-cache-dependency-path: package-lock.json
       - run: just init
       # The PR title becomes the squash-merge commit message on `main`, so
       # that's the message that has to be conventional. Per-commit hygiene
@@ -66,19 +71,14 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
       # `just build` depends on `web-build`, which `npm ci`s the Tailwind +
       # htmx toolchain in web/tailwind/ and emits the .gitignore'd assets
-      # the Go binary embeds. Cache is keyed on the tailwind lockfile.
-      - uses: actions/setup-node@v6
+      # the Go binary embeds. The composite caches Go modules and npm,
+      # keyed on web/tailwind/package-lock.json by default.
+      - uses: ./.github/actions/setup-toolchain
         with:
+          go-version: ${{ env.GO_VERSION }}
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/tailwind/package-lock.json
-      - uses: extractions/setup-just@v4
       - name: just build
         run: just build
       - name: just test
@@ -97,18 +97,12 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      # Same toolchain setup as the `go` job: `just test-integration`
+      # depends on `build`, which depends on `web-build` (npm ci).
+      - uses: ./.github/actions/setup-toolchain
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
-      # Same setup-node story as the `go` job: `just test-integration`
-      # depends on `build`, which depends on `web-build` (npm ci).
-      - uses: actions/setup-node@v6
-        with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/tailwind/package-lock.json
-      - uses: extractions/setup-just@v4
       # `just test-integration` brings up the `test`-profile infra
       # (db-test on 5433 + redis-test on 6380), builds the binary, applies
       # migrations against the test DB, and runs the build-tagged tests --
@@ -143,16 +137,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-toolchain
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - uses: actions/setup-node@v6
-        with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/tailwind/package-lock.json
-      - uses: extractions/setup-just@v4
 
       - name: just release-binaries
         run: just release-binaries
@@ -208,12 +196,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve version from git
-        id: version
-        run: |
-          version=$(git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Resolved VERSION=$version"
+      # Resolve VERSION (via `git describe`) + DATE (committer timestamp,
+      # RFC3339 UTC). Same composite is used by release.yaml with
+      # `version-source: tag` so binary, image tag, and git tag all line
+      # up on tag pushes.
+      - name: Resolve build metadata
+        id: meta-build
+        uses: ./.github/actions/resolve-build-metadata
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -256,9 +245,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
-            DATE=${{ github.event.head_commit.timestamp }}
+            DATE=${{ steps.meta-build.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -276,9 +265,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
-            DATE=${{ github.event.pull_request.updated_at }}
+            DATE=${{ steps.meta-build.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
