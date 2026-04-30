@@ -303,8 +303,12 @@ func TestCreate_DuplicateUserSuppliedCodeReturns409(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
 	}
-	if got := decodeError(t, body).Error; got == "" {
+	got := decodeError(t, body)
+	if got.Error == "" {
 		t.Errorf("expected non-empty error message")
+	}
+	if got.Code != handlers.ErrCodeCodeTaken {
+		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeCodeTaken)
 	}
 }
 
@@ -432,23 +436,27 @@ func TestCreate_BadInputReturns4xx(t *testing.T) {
 	tests := []struct {
 		name, body string
 		wantStatus int
+		wantCode   string
 	}{
-		{"invalid_json", `{not json`, http.StatusBadRequest},
-		{"missing_target_url", `{}`, http.StatusUnprocessableEntity},
-		{"empty_target_url", `{"target_url":""}`, http.StatusUnprocessableEntity},
-		{"non_http_scheme", `{"target_url":"ftp://x.example"}`, http.StatusUnprocessableEntity},
-		{"no_host", `{"target_url":"http://"}`, http.StatusUnprocessableEntity},
-		{"too_long", `{"target_url":"https://x.example/` + strings.Repeat("a", 2100) + `"}`, http.StatusUnprocessableEntity},
-		{"bad_user_code", `{"target_url":"https://x.example","code":"!!!"}`, http.StatusUnprocessableEntity},
+		{"invalid_json", `{not json`, http.StatusBadRequest, handlers.ErrCodeInvalidJSONBody},
+		{"missing_target_url", `{}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
+		{"empty_target_url", `{"target_url":""}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
+		{"non_http_scheme", `{"target_url":"ftp://x.example"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
+		{"no_host", `{"target_url":"http://"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
+		{"too_long", `{"target_url":"https://x.example/` + strings.Repeat("a", 2100) + `"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
+		{"bad_user_code", `{"target_url":"https://x.example","code":"!!!"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			st, cc := newFakeStore(), newFakeCache()
 			e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{codes: []string{"unused0"}})
-			rec, _ := doJSON(t, e, http.MethodPost, "/api/v1/links", tt.body)
+			rec, body := doJSON(t, e, http.MethodPost, "/api/v1/links", tt.body)
 			if rec.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if got := decodeError(t, body); got.Code != tt.wantCode {
+				t.Errorf("error code = %q, want %q (body=%s)", got.Code, tt.wantCode, body)
 			}
 		})
 	}
@@ -481,9 +489,12 @@ func TestGet_UnknownCodeReturns404(t *testing.T) {
 	t.Parallel()
 	st, cc := newFakeStore(), newFakeCache()
 	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
-	rec, _ := doJSON(t, e, http.MethodGet, "/api/v1/links/missing", "")
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links/missing", "")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if got := decodeError(t, body); got.Code != handlers.ErrCodeNotFound {
+		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeNotFound)
 	}
 }
 
@@ -648,9 +659,12 @@ func TestGet_ExpiredLinkReturns410(t *testing.T) {
 	}
 	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
 
-	rec, _ := doJSON(t, e, http.MethodGet, "/api/v1/links/expired", "")
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links/expired", "")
 	if rec.Code != http.StatusGone {
 		t.Errorf("status = %d, want 410", rec.Code)
+	}
+	if got := decodeError(t, body); got.Code != handlers.ErrCodeLinkExpired {
+		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeLinkExpired)
 	}
 }
 
