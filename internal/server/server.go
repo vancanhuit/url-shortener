@@ -168,7 +168,7 @@ func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 		LogLatency:   true,
 		LogRequestID: true,
 		HandleError:  true,
-		LogValuesFunc: func(_ *echo.Context, v middleware.RequestLoggerValues) error {
+		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
 			level := slog.LevelInfo
 			switch {
 			case v.Error != nil, v.Status >= 500:
@@ -187,7 +187,16 @@ func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 			if v.Error != nil {
 				attrs = append(attrs, "error", v.Error.Error())
 			}
-			logger.Log(context.Background(), level, "http request", attrs...)
+			// Forward the request context so handlers like otelslog can
+			// extract the trace/span IDs the http server installed.
+			// Falls back to Background only if the request is somehow
+			// detached (e.g. tests that synthesise a logger value
+			// directly), which keeps the call total-safe.
+			ctx := context.Background()
+			if c != nil && c.Request() != nil {
+				ctx = c.Request().Context()
+			}
+			logger.Log(ctx, level, "http request", attrs...)
 			return nil
 		},
 	})
