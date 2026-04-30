@@ -87,13 +87,13 @@ test:
 # URLs are hard-coded against the `test`-profile services in compose.yaml
 # (db-test on host port 5433, redis-test on 6380); update both files
 # together if those ports ever change.
-test-integration:
+test-integration: build
     #!/usr/bin/env bash
     set -euo pipefail
 
     export URL_SHORTENER_TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5433/url_shortener?sslmode=disable'
     export URL_SHORTENER_TEST_REDIS_URL='redis://localhost:6380/0'
-
+    ./bin/url-shortener migrate up --database-url "$URL_SHORTENER_TEST_DATABASE_URL"
     docker compose --profile=test up --wait --detach db-test redis-test
     go test -race -v -cover -tags=integration ./...
 
