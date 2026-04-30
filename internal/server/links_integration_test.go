@@ -64,7 +64,6 @@ func startFullServer(t *testing.T) (string, func()) {
 		BaseURL:    "http://short.test",
 		LogLevel:   "info",
 		LogFormat:  "text",
-		RedisURL:   redisURL,
 		CodeLength: shortener.DefaultLength,
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -248,7 +247,6 @@ func TestServer_GracefulShutdownDrainsBackgroundTasks(t *testing.T) {
 		BaseURL:    "http://short.test",
 		LogLevel:   "info",
 		LogFormat:  "text",
-		RedisURL:   redisURL,
 		CodeLength: shortener.DefaultLength,
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

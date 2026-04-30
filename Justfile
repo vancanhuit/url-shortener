@@ -93,7 +93,6 @@ test-integration: build
 
     export URL_SHORTENER_TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5433/url_shortener?sslmode=disable'
     export URL_SHORTENER_TEST_REDIS_URL='redis://localhost:6380/0'
-
     docker compose --profile=test up --wait --detach db-test redis-test
     ./bin/url-shortener migrate up --database-url "$URL_SHORTENER_TEST_DATABASE_URL"
     go test -race -v -cover -tags=integration ./...
