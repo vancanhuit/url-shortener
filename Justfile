@@ -144,7 +144,11 @@ vuln:
     # is already current.
     gobin="$(go env GOPATH)/bin"
     GOBIN="$gobin" go install golang.org/x/vuln/cmd/govulncheck@latest
-    "$gobin/govulncheck" -tags=integration ./...
+    # `-show=verbose` makes the per-run module + package inventory
+    # visible in CI logs, so a failed run is easy to triage and a
+    # passing one documents exactly what was scanned (12 root packages,
+    # ~30 modules, and the stdlib at the time of writing).
+    "$gobin/govulncheck" -show=verbose -tags=integration ./...
 
 # Tidy go.mod / go.sum.
 tidy:
