@@ -77,6 +77,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # -----------------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian13:nonroot AS runtime
 
+# Static OCI image labels. Dynamic ones (version, revision, created)
+# are emitted per build by docker/metadata-action in CI; baking the
+# fixed identity here means `docker build` outside CI inherits them
+# too. See https://github.com/opencontainers/image-spec/blob/main/annotations.md
+LABEL org.opencontainers.image.title="url-shortener" \
+      org.opencontainers.image.description="A small URL-shortener service with a JSON API and HTMX web UI." \
+      org.opencontainers.image.source="https://github.com/vancanhuit/url-shortener" \
+      org.opencontainers.image.url="https://github.com/vancanhuit/url-shortener" \
+      org.opencontainers.image.documentation="https://github.com/vancanhuit/url-shortener#readme" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="vancanhuit"
+
 WORKDIR /app
 
 COPY --from=builder /out/url-shortener /usr/local/bin/url-shortener
