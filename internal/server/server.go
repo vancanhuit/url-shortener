@@ -179,9 +179,13 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		s.logger.Info("http server shutting down", "reason", ctx.Err())
 	}
 
+	// Deliberately root the shutdown context at Background, not the
+	// already-canceled `ctx`: http.Server.Shutdown needs a live
+	// context to drain, and the 15s timeout is the bound we want on
+	// the stop sequence regardless of how Serve was woken.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	shutdownErr := s.http.Shutdown(shutdownCtx)
+	shutdownErr := s.http.Shutdown(shutdownCtx) //nolint:contextcheck // see comment above; fresh ctx is intentional.
 
 	// Drain background goroutines (currently just async click counter
 	// increments) before reporting shutdown complete. Any work fired
@@ -191,7 +195,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// left in shutdownCtx -- typically most of the 15s, since
 	// http.Shutdown returns as soon as the last in-flight request
 	// finishes -- so the overall stop time is still bounded.
-	if remaining := timeUntil(shutdownCtx); remaining > 0 {
+	if remaining := timeUntil(shutdownCtx); remaining > 0 { //nolint:contextcheck // shutdownCtx is intentionally fresh; see Shutdown call above.
 		if !s.links.WaitForBackgroundTasks(remaining) {
 			s.logger.Warn("background tasks did not drain before shutdown deadline",
 				"budget", remaining)

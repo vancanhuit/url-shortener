@@ -21,28 +21,40 @@ linters:
     - gosec          # security-focused static analysis.
 
     # Resource / API misuse.
-    - bodyclose      # http.Response.Body must be closed; the redirect path and tests rely on this.
-    - noctx          # outbound HTTP without context can hang shutdown.
-    - makezero       # `make([]T, n)` then `append` is almost always a bug.
-    - durationcheck  # catches `time.Duration * time.Duration` style mistakes.
+    - bodyclose       # http.Response.Body must be closed; the redirect path and tests rely on this.
+    - noctx           # outbound HTTP without context can hang shutdown.
+    - makezero        # `make([]T, n)` then `append` is almost always a bug.
+    - durationcheck   # catches `time.Duration * time.Duration` style mistakes.
+    - forcetypeassert # bans `x.(T)` without the comma-ok form (silent panic risk).
 
     # Error-handling discipline (matches the centralised error classification work).
-    - errorlint      # enforce errors.Is/As; flag %v on errors and direct ==.
-    - nilerr         # `if err != nil { return nil }` smells.
-    - nilnil         # returning (nil, nil) hides ambiguity.
+    - errorlint       # enforce errors.Is/As; flag %v on errors and direct ==.
+    - nilerr          # `if err != nil { return nil }` smells.
+    - nilnil          # returning (nil, nil) hides ambiguity.
+
+    # Context discipline. Shutdown drain + DB retries depend on the right
+    # ctx being threaded through; these two catch foot-guns the compiler
+    # cannot.
+    - contextcheck    # detects passing the wrong context (e.g. Background) to a downstream call.
+    - fatcontext      # detects ctx leaks via nested context.WithValue or accumulation in loops.
 
     # Variadic / logging foot-guns. The slogger takes `...any`; asasalint catches
     # accidentally passing a single `[]any` slice in place of variadic args.
     - asasalint
 
+    # Mutation discipline.
+    - reassign        # flags reassignment of top-level package vars (e.g. sentinels).
+
     # Style / hygiene.
-    - copyloopvar    # Go 1.22+ loop-var capture; cheap to keep on.
-    - unconvert      # redundant type conversions.
-    - misspell       # comment/string typos -- catches doc drift early.
-    - nolintlint     # validates that //nolint directives are well-formed and used.
+    - copyloopvar     # Go 1.22+ loop-var capture; cheap to keep on.
+    - unconvert       # redundant type conversions.
+    - misspell        # comment/string typos -- catches doc drift early.
+    - nolintlint      # validates that //nolint directives are well-formed and used.
+    - usestdlibvars   # nudges magic strings ("GET", "200") toward http.MethodGet / http.StatusOK.
 
     # Concurrency in tests.
-    - tparallel      # flags t.Parallel() misuse.
+    - tparallel       # flags t.Parallel() misuse.
+    - thelper         # every (*testing.T) helper must call t.Helper() so failures point at the caller.
   settings:
     revive:
       rules:
