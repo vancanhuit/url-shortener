@@ -327,12 +327,21 @@ release-binaries V=VERSION: web-build
 # Multi-arch build for linux/amd64 + linux/arm64. By default loads nothing
 # (buildx cannot --load multi-arch into the local daemon); pass `true`
 # as the first argument to publish to a registry.
+#
+# `--sbom=true` and `--provenance=mode=max` mirror the CI build-push-action
+# settings so a local multi-arch build produces the same in-toto
+# attestations the registry-pushed image carries. Local single-arch
+# `docker-build` skips them: BuildKit can only attach attestations to
+# images with the OCI v1.1 manifest layout, which the local docker daemon
+# (used by `--load`) does not accept.
 docker-buildx PUSH="false":
     docker buildx build \
         --platform {{PLATFORMS}} \
         --build-arg VERSION={{VERSION}} \
         --build-arg COMMIT={{COMMIT}} \
         --build-arg DATE={{DATE}} \
+        --sbom=true \
+        --provenance=mode=max \
         -t url-shortener:{{VERSION}} \
         {{ if PUSH == "true" { "--push" } else { "--output=type=image,push=false" } }} \
         .

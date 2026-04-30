@@ -138,6 +138,16 @@ jobs:
             VERSION=${{ steps.meta-build.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta-build.outputs.date }}
+          # Attach an SPDX SBOM (BuildKit's default scanner emits SPDX 2.3)
+          # and SLSA-style provenance in `max` mode (full source/build-step
+          # graph) as in-toto attestations on the manifest index.
+          # Released images are the ones consumers actually deploy from,
+          # so these matter most here -- a downstream user can always
+          # answer "what's in v1.2.3?" with one `docker buildx imagetools
+          # inspect` call instead of rebuilding from source. See ci.yaml's
+          # image job for the consumer-side fetch commands.
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
