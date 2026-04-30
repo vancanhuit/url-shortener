@@ -23,6 +23,11 @@ PLATFORMS              := "linux/amd64,linux/arm64"
 # env var defined in .github/workflows/ci.yaml so there is a single source of
 # truth per run; the literal here is the default for local development.
 GOLANGCI_LINT_VERSION  := env("GOLANGCI_LINT_VERSION", "2.11.4")
+# Trivy version. Installed via the official install.sh into $GOPATH/bin
+# rather than the aquasecurity/trivy-action GitHub Action -- the action
+# was compromised in the March-2026 supply-chain incident, so we stick
+# to the upstream binary at a pinned version we control.
+TRIVY_VERSION          := env("TRIVY_VERSION", "0.70.0")
 LDFLAGS := "-s -w" + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=" + VERSION + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit="  + COMMIT  + \
@@ -149,6 +154,44 @@ vuln:
     # passing one documents exactly what was scanned (12 root packages,
     # ~30 modules, and the stdlib at the time of writing).
     "$gobin/govulncheck" -show=verbose -tags=integration ./...
+
+# Install trivy v{{TRIVY_VERSION}} into $GOPATH/bin via the official
+# install.sh. Idempotent: a no-op when the right version is already
+# present. We pin to a specific release rather than tracking `latest`
+# because trivy is a security-critical binary; reproducible scans
+# require a reproducible scanner, and bumps should be intentional.
+trivy-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    gobin="$(go env GOPATH)/bin"
+    bin="$gobin/trivy"
+    want="{{TRIVY_VERSION}}"
+    have="$([ -x "$bin" ] && "$bin" --version 2>/dev/null | awk '/^Version/ {print $2}' | head -1 || echo none)"
+    if [ "$have" = "$want" ]; then
+        echo "trivy $want already installed at $bin"
+    else
+        echo "installing trivy $want into $gobin (have: $have)"
+        curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$gobin" "v$want"
+    fi
+
+# Build the local Docker image (`url-shortener:dev`) and scan it with
+# Trivy. Complements `just vuln`: govulncheck only sees Go code, while
+# Trivy inspects the entire runtime image -- the distroless base, the
+# embedded binary, and any OS-level CPEs the registry knows about.
+#
+# Severity gate: HIGH and CRITICAL fail the run; --ignore-unfixed
+# silences findings for which there is no upstream fix yet (we cannot
+# act on those, and they otherwise create perpetual noise). Tune this
+# in CI by overriding TRIVY_SEVERITY when the policy needs to change.
+trivy-image: trivy-install docker-build
+    "$(go env GOPATH)/bin/trivy" image \
+        --severity HIGH,CRITICAL \
+        --ignore-unfixed \
+        --exit-code 1 \
+        --no-progress \
+        url-shortener:dev
 
 # Tidy go.mod / go.sum.
 tidy:

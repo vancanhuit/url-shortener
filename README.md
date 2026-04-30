@@ -35,6 +35,7 @@ just test                              # run unit tests with -race -v -cover
 just test-integration                  # bring up test-profile infra, migrate, run -tags=integration tests
 just lint                              # run golangci-lint (auto-installs the pinned version)
 just vuln                              # run govulncheck against the latest Go vuln database
+just trivy-image                       # build the Docker image and scan it with Trivy (HIGH/CRITICAL)
 docker compose up --wait -d            # bring up the full local dev stack (db + redis + server on 5432/6379/8080)
 docker compose down -v                 # tear down the dev stack
 docker compose --profile=test down -v  # tear down the test-profile stack (db-test + redis-test on 5433/6380)
