@@ -252,13 +252,21 @@ can pull the bleeding edge without waiting for a release tag:
 | `:edge` | every push to `main` | floating dev pointer |
 | `:main-<short_sha>` | every push to `main` | pin to a specific commit |
 
+Each push to `main` also uploads a binaries artifact to the workflow
+run for users who deploy the binary directly rather than the image:
+
+- `binaries-main-<short_sha>` -- `url-shortener_<version>_<os>_<arch>.tar.gz`
+  for `linux`/`darwin` x `amd64`/`arm64`, plus `SHA256SUMS`. 30-day
+  retention, indexed by the same short-sha as the matching `:main-<short_sha>`
+  image so the two stay in lockstep.
+
 Pull-request runs do **not** push to GHCR. Instead they upload two
 artifacts to the workflow run that you can grab from the Actions UI:
 
 - `binaries-pr-<N>` -- `url-shortener_<version>_<os>_<arch>.tar.gz`
-  for all four platforms, plus `SHA256SUMS`.
+  for all four platforms, plus `SHA256SUMS`. 7-day retention.
 - `oci-image-pr-<N>` -- a single multi-arch OCI tarball; load it with
-  `docker load -i url-shortener-oci.tar`.
+  `docker load -i url-shortener-oci.tar`. 7-day retention.
 
 The binary embeds a `git describe` version string of the form
 `<latest_tag>-<N>-g<sha>` (or just `<sha>` when no tags exist yet),
