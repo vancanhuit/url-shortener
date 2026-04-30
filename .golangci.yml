@@ -46,9 +46,29 @@ linters:
   settings:
     revive:
       rules:
+        # Identifier conventions: MixedCaps + standard initialism list
+        # (URL, ID, HTTP, JSON, API, etc. -- not Url/Id/Http/Json/Api).
         - name: var-naming
+        # `exported` would require docstrings on every public symbol;
+        # we already write them where they pull weight, so leave the
+        # linter off rather than ratcheting against a future-tense rule.
         - name: exported
           disabled: true
+        # Every method on a type T must use the same receiver name
+        # (e.g. always `s *Server`, never sometimes `srv` or `self`).
+        - name: receiver-naming
+        # Catches package-local pairs like Foo / foo whose only
+        # difference is case -- usually a refactor accident.
+        - name: confusing-naming
+        # Flags local vars that shadow an imported package name
+        # (`var url = "..."` inside a file that imports net/url).
+        - name: import-shadowing
+        # Flags identifiers that shadow predeclared builtins like
+        # len, new, copy, error -- a classic foot-gun.
+        - name: redefines-builtin-id
+        # Bans `import . "foo"`; we never do this and the rule keeps
+        # it that way.
+        - name: dot-imports
     gosec:
       excludes:
         # G104 (errcheck duplicate) is already covered by errcheck.
