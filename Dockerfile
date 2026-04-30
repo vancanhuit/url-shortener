@@ -8,7 +8,7 @@
 # nonroot, which is itself a multi-arch manifest.
 
 ARG GO_VERSION=1.26.2
-ARG NODE_VERSION=24
+ARG NODE_VERSION=24.14.1
 
 # -----------------------------------------------------------------------------
 # Web-assets stage: compile Tailwind CSS and vendor htmx.min.js.
@@ -16,7 +16,7 @@ ARG NODE_VERSION=24
 # `//go:embed`, so they have to exist before the Go builder runs. Pinned
 # to BUILDPLATFORM since the toolchain is JS, not arch-specific.
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-alpine AS web-builder
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-trixie-slim AS web-builder
 
 WORKDIR /src/web
 
@@ -33,7 +33,7 @@ RUN cd tailwind && npm run build
 # -----------------------------------------------------------------------------
 # Builder stage: cross-compile the Go binary.
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-trixie AS builder
 
 WORKDIR /src
 
