@@ -11,6 +11,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -150,6 +151,34 @@ func TestServer_OperationalEndpointsOverRealNetwork(t *testing.T) {
 			t.Errorf("status = %d, want 404", code)
 		}
 	})
+}
+
+func TestServer_RejectsOversizedRequestBody(t *testing.T) {
+	base, stop := startServer(t)
+	defer stop()
+
+	// 1 MiB of payload is two orders of magnitude over the 16 KiB cap;
+	// /healthz is a route that doesn't otherwise read the body, so a
+	// successful 413 here proves the BodyLimit middleware fires before
+	// the request reaches any handler. The path is irrelevant -- any
+	// route under the global middleware chain will do.
+	payload := bytes.Repeat([]byte("x"), 1<<20)
+	req, err := http.NewRequestWithContext(t.Context(),
+		http.MethodPost, base+"/healthz", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", resp.StatusCode)
+	}
 }
 
 func TestServer_GracefulShutdownClosesListener(t *testing.T) {

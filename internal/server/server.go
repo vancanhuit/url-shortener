@@ -33,6 +33,16 @@ const (
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
 	shutdownTimeout   = 15 * time.Second
+
+	// maxRequestBodyBytes caps the size of any single request body
+	// the server will accept. The largest legitimate payload is the
+	// JSON create-link request, which carries at most a 2 KiB
+	// target_url plus a small envelope; 16 KiB leaves an order of
+	// magnitude of headroom while still rejecting buggy or
+	// adversarial uploads early -- before the JSON decoder allocates
+	// against them. The HTML form route is also covered because the
+	// middleware runs before any handler-level decoding.
+	maxRequestBodyBytes = 16 * 1024
 )
 
 // Deps groups the optional runtime dependencies the server needs. Each
@@ -61,6 +71,13 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
 	e.Use(slogRequestLogger(logger))
+	// Cap request bodies before any handler reads them. Echo's
+	// BodyLimit short-circuits with 413 Request Entity Too Large
+	// when Content-Length exceeds the cap, and wraps the body
+	// reader so chunked / unknown-length requests are caught mid-
+	// read too. Applies to every route, including the static
+	// asset handler (where bodies are always empty in practice).
+	e.Use(middleware.BodyLimit(maxRequestBodyBytes))
 
 	op := handlers.NewOperational()
 	if deps.Store != nil {
