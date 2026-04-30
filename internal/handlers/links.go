@@ -167,6 +167,48 @@ type ValidationError struct{ Msg string }
 
 func (e *ValidationError) Error() string { return e.Msg }
 
+// PersistErrorKind classifies the failure modes of Links.Persist so
+// HTTP layers can drive their response selection from a single switch
+// instead of re-implementing the errors.As/errors.Is fork in every
+// caller.
+type PersistErrorKind int
+
+// PersistError* are the kinds returned by ClassifyPersistError. None
+// is the zero value, returned only when the underlying error is nil.
+const (
+	PersistErrNone PersistErrorKind = iota
+	PersistErrValidation
+	PersistErrCodeTaken
+	PersistErrInternal
+)
+
+// ClassifyPersistError maps an error returned by Persist to a kind,
+// the HTTP status code matching that kind, and -- for validation
+// failures -- the user-facing message extracted from the error. The
+// JSON API and the HTML form share this classification but render the
+// non-validation copy ("code already in use" vs "That code is already
+// in use.") differently, which is why this returns the parts to plug
+// into a response rather than a fully-formed reply.
+//
+// Internal errors are logged here as a side effect (with op as the
+// caller-supplied scope label, e.g. "links: create" or "web: create")
+// so callers don't have to repeat the slog call site.
+func (h *Links) ClassifyPersistError(op string, err error) (kind PersistErrorKind, status int, msg string) {
+	if err == nil {
+		return PersistErrNone, 0, ""
+	}
+	var verr *ValidationError
+	switch {
+	case errors.As(err, &verr):
+		return PersistErrValidation, http.StatusUnprocessableEntity, verr.Msg
+	case errors.Is(err, store.ErrCodeTaken):
+		return PersistErrCodeTaken, http.StatusConflict, ""
+	default:
+		h.logger.Error(op+": persist failed", "error", err)
+		return PersistErrInternal, http.StatusInternalServerError, ""
+	}
+}
+
 // Persist validates the inputs, normalizes the target URL, and either
 // creates a new link or returns an existing one (auto-generated codes
 // with no expiry only). The returned errors are typed so callers can
@@ -288,15 +330,15 @@ func (h *Links) Create(c *echo.Context) error {
 	}
 
 	link, created, err := h.Persist(c.Request().Context(), req.TargetURL, req.Code, req.ExpiresAt)
-	var verr *ValidationError
-	switch {
-	case errors.As(err, &verr):
-		return c.JSON(http.StatusUnprocessableEntity, ErrorResponse{Error: verr.Msg})
-	case errors.Is(err, store.ErrCodeTaken):
-		return c.JSON(http.StatusConflict, ErrorResponse{Error: "code already in use"})
-	case err != nil:
-		h.logger.Error("links: create failed", "error", err)
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal error"})
+	switch kind, status, msg := h.ClassifyPersistError("links: create", err); kind {
+	case PersistErrNone:
+		// fall through to the success response below
+	case PersistErrValidation:
+		return c.JSON(status, ErrorResponse{Error: msg})
+	case PersistErrCodeTaken:
+		return c.JSON(status, ErrorResponse{Error: "code already in use"})
+	case PersistErrInternal:
+		return c.JSON(status, ErrorResponse{Error: "internal error"})
 	}
 	status := http.StatusCreated
 	if !created {

@@ -156,15 +156,15 @@ func (w *Web) Create(c *echo.Context) error {
 	}
 
 	link, created, err := w.links.Persist(c.Request().Context(), target, userCode, expiresAt)
-	var verr *ValidationError
-	switch {
-	case errors.As(err, &verr):
-		return w.renderError(c, http.StatusUnprocessableEntity, verr.Msg)
-	case errors.Is(err, store.ErrCodeTaken):
-		return w.renderError(c, http.StatusConflict, "That code is already in use.")
-	case err != nil:
-		w.logger.Error("web: create failed", "error", err)
-		return w.renderError(c, http.StatusInternalServerError, "Something went wrong. Try again.")
+	switch kind, status, msg := w.links.ClassifyPersistError("web: create", err); kind {
+	case PersistErrNone:
+		// fall through to the success render below
+	case PersistErrValidation:
+		return w.renderError(c, status, msg)
+	case PersistErrCodeTaken:
+		return w.renderError(c, status, "That code is already in use.")
+	case PersistErrInternal:
+		return w.renderError(c, status, "Something went wrong. Try again.")
 	}
 
 	// Re-fetch the first page so the OOB swap inside link-result.html
