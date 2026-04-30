@@ -75,7 +75,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # -----------------------------------------------------------------------------
 # Runtime stage: distroless static, nonroot.
 # -----------------------------------------------------------------------------
-FROM gcr.io/distroless/static-debian13:nonroot AS runtime
+FROM gcr.io/distroless/static-debian13:nonroot
 
 # Static OCI image labels. Dynamic ones (version, revision, created)
 # are emitted per build by docker/metadata-action in CI; baking the
