@@ -152,7 +152,7 @@ jobs:
         run: just release-binaries
 
       - name: Upload binaries artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: binaries-pr-${{ github.event.pull_request.number }}
           path: |
@@ -262,7 +262,7 @@ jobs:
 
       - name: Upload OCI tarball
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: oci-image-pr-${{ github.event.pull_request.number }}
           path: ./url-shortener-oci.tar
