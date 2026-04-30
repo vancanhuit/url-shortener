@@ -239,7 +239,10 @@ publishes:
   publish only `:v1.2.3-beta1` and don't move `:latest`.
 - **Binary archives** `url-shortener_<version>_<os>_<arch>.tar.gz` for
   linux + darwin on both architectures, attached to the matching
-  GitHub Release alongside `SHA256SUMS`.
+  GitHub Release alongside both per-archive `<archive>.tar.gz.sha256`
+  files and an aggregate `SHA256SUMS`. Verify a single archive with
+  `sha256sum -c <archive>.tar.gz.sha256`, or all of them at once with
+  `sha256sum -c SHA256SUMS`.
 
 See `CONTRIBUTING.md` for the tag-and-push flow that produces them.
 
@@ -257,7 +260,8 @@ Each push to `main` also uploads a binaries artifact to the workflow
 run for users who deploy the binary directly rather than the image:
 
 - `binaries-main-<short_sha>` -- `url-shortener_<version>_<os>_<arch>.tar.gz`
-  for `linux`/`darwin` x `amd64`/`arm64`, plus `SHA256SUMS`. 30-day
+  for `linux`/`darwin` x `amd64`/`arm64`, plus per-archive
+  `.tar.gz.sha256` files and an aggregate `SHA256SUMS`. 30-day
   retention, indexed by the same short-sha as the matching `:main-<short_sha>`
   image so the two stay in lockstep.
 
@@ -265,7 +269,8 @@ Pull-request runs do **not** push to GHCR. Instead they upload two
 artifacts to the workflow run that you can grab from the Actions UI:
 
 - `binaries-pr-<N>` -- `url-shortener_<version>_<os>_<arch>.tar.gz`
-  for all four platforms, plus `SHA256SUMS`. 7-day retention.
+  for all four platforms, plus per-archive `.tar.gz.sha256` files
+  and an aggregate `SHA256SUMS`. 7-day retention.
 - `oci-image-pr-<N>` -- a single multi-arch OCI tarball; load it with
   `docker load -i url-shortener-oci.tar`. 7-day retention.
 

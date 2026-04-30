@@ -124,7 +124,8 @@ jobs:
   binaries:
     name: binaries
     # Cross-compile the binary for linux/darwin x amd64/arm64 and upload
-    # the resulting tar.gz archives + SHA256SUMS as a workflow artifact:
+    # the resulting tar.gz archives, per-archive .tar.gz.sha256 files,
+    # and the aggregate SHA256SUMS as a workflow artifact:
     #
     #   - on PR:        binaries-pr-<number>      (7d retention)
     #   - on main push: binaries-main-<short_sha> (30d retention)
@@ -177,6 +178,7 @@ jobs:
           name: ${{ steps.artifact.outputs.name }}
           path: |
             dist/url-shortener_*.tar.gz
+            dist/url-shortener_*.tar.gz.sha256
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: ${{ steps.artifact.outputs.retention }}

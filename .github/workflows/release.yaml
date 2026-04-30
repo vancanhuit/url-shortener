@@ -11,8 +11,8 @@
 #      reference the same artifact by the same name.
 #
 #   2. Cross-compiled binary archives for linux/{amd64,arm64} and
-#      darwin/{amd64,arm64} plus a SHA256SUMS file, uploaded as GitHub
-#      Release assets.
+#      darwin/{amd64,arm64} plus per-archive `.sha256` files and an
+#      aggregate `SHA256SUMS`, all uploaded as GitHub Release assets.
 #
 #   3. A GitHub Release whose body is the auto-generated changelog
 #      between the previous tag and the new one, grouped by
@@ -145,7 +145,8 @@ jobs:
       # The Justfile reads VERSION from `git describe --tags`, which on a
       # tag push reports e.g. `v1.2.3` verbatim. The release-binaries
       # recipe emits url-shortener_${VERSION}_${os}_${arch}.tar.gz
-      # under ./dist along with SHA256SUMS.
+      # under ./dist, plus per-archive .tar.gz.sha256 files and an
+      # aggregate SHA256SUMS.
       - name: Build release binaries
         run: just release-binaries
 
@@ -173,4 +174,5 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/url-shortener_*.tar.gz
+            dist/url-shortener_*.tar.gz.sha256
             dist/SHA256SUMS
