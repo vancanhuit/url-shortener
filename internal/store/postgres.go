@@ -27,6 +27,54 @@ var ErrCodeTaken = errors.New("store: code already taken")
 // uniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
 const uniqueViolation = "23505"
 
+// Transient SQLSTATE codes recognised by IsTransient. The list is
+// intentionally narrow: every entry must describe a failure that is
+// safe to retry against an idempotent statement without changing the
+// observed semantics. We deliberately exclude
+//
+//   - 40002 (transaction_integrity_constraint_violation): a constraint
+//     check failed; retrying produces the same result, so this is a
+//     real input-shape error, not a transient one.
+//   - the 08* connection-exception class: pgxpool already reconnects
+//     transparently when checking out a fresh connection; an 08* that
+//     reaches the caller means the in-flight statement was lost
+//     mid-flight and we don't know whether it committed.
+const (
+	sqlstateSerializationFailure       = "40001"
+	sqlstateStatementCompletionUnknown = "40003"
+	sqlstateDeadlockDetected           = "40P01"
+)
+
+// IsTransient reports whether err is a transient database failure that
+// is safe to retry against an idempotent operation. Currently this
+// covers serialization failures, deadlock detections, and statement-
+// completion-unknown -- the SQLSTATE codes Postgres uses to signal
+// "give it another go and it might just work" against READ COMMITTED
+// or higher isolation. Any other error -- including a nil error -- is
+// classified as non-transient.
+//
+// Callers should keep retries bounded (count + total time budget) and
+// only apply this on operations that are safe to repeat: the increment
+// counter is the canonical example. Do not retry write paths whose
+// idempotency depends on application-level invariants without thinking
+// through the failure modes first.
+func IsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	switch pgErr.Code {
+	case sqlstateSerializationFailure,
+		sqlstateStatementCompletionUnknown,
+		sqlstateDeadlockDetected:
+		return true
+	}
+	return false
+}
+
 // DBTX is satisfied by *pgxpool.Pool (and pgxpool.Conn) as well as pgx.Tx,
 // allowing store methods to participate in caller-managed transactions.
 type DBTX interface {

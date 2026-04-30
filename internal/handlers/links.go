@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -40,6 +41,20 @@ const (
 	// the database, short enough that a permanently degraded DB
 	// can't pin goroutines around forever under sustained traffic.
 	clickTimeout = 5 * time.Second
+
+	// Click-increment retry schedule for transient DB failures
+	// (deadlock_detected etc.). The increment is detached, so the
+	// retries don't add user-visible latency; the budget below stays
+	// well inside clickTimeout even at the cap.
+	//
+	//   attempt 1: immediate
+	//   attempt 2: ~50ms +/- 25ms
+	//   attempt 3: ~100ms +/- 50ms
+	//   attempt 4: ~200ms +/- 100ms
+	//   attempt 5: ~400ms +/- 200ms  (worst case ~750ms total)
+	clickRetryAttempts   = 5
+	clickRetryBaseDelay  = 50 * time.Millisecond
+	clickRetryMaxBackoff = 1 * time.Second
 
 	// clockSkewGrace is the leniency applied when validating a
 	// caller-supplied expires_at: a few seconds in the past is
@@ -460,16 +475,73 @@ func (h *Links) Redirect(c *echo.Context) error {
 // without bound. The WaitGroup makes it possible for tests (and a
 // future graceful-shutdown path) to wait for in-flight clicks; in
 // production we don't otherwise observe it.
+//
+// Transient DB errors (deadlock, serialization failure, statement
+// completion unknown) are retried with exponential backoff + jitter
+// inside the goroutine; non-transient errors and exhausted budgets
+// are logged and dropped, since the click counter is best-effort.
 func (h *Links) recordClick(code string) {
 	h.bgWG.Add(1)
 	go func() {
 		defer h.bgWG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
 		defer cancel()
-		if err := h.store.IncrementClicks(ctx, nil, code); err != nil {
+		if err := h.incrementClicksWithRetry(ctx, code); err != nil {
 			h.logger.Warn("links: increment clicks failed", "error", err, "code", code)
 		}
 	}()
+}
+
+// incrementClicksWithRetry calls store.IncrementClicks with bounded
+// exponential backoff (jittered) on transient errors. It returns the
+// last error observed (or nil on success). The function is unexported
+// because the retry policy is bespoke to this call site -- the
+// counter is idempotent under repeated UPDATE, so re-issuing an
+// ambiguously-completed statement is safe.
+func (h *Links) incrementClicksWithRetry(ctx context.Context, code string) error {
+	var err error
+	backoff := clickRetryBaseDelay
+	for attempt := 1; attempt <= clickRetryAttempts; attempt++ {
+		err = h.store.IncrementClicks(ctx, nil, code)
+		if err == nil {
+			return nil
+		}
+		if !store.IsTransient(err) {
+			return err
+		}
+		if attempt == clickRetryAttempts {
+			break
+		}
+		// Sleep before the next attempt; bail early if the caller's
+		// context (clickTimeout) expires while we wait. Returning the
+		// most recent transient err -- not ctx.Err() -- gives the log
+		// line a more useful root-cause for an operator scanning for
+		// 40P01 spikes.
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(jitter(backoff)):
+		}
+		backoff *= 2
+		if backoff > clickRetryMaxBackoff {
+			backoff = clickRetryMaxBackoff
+		}
+	}
+	return err
+}
+
+// jitter returns d randomized within [d/2, 3d/2). Decorrelated jitter
+// would smear retries even more uniformly, but for a single-instance
+// best-effort counter the simpler full-range jitter is plenty.
+func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	half := d / 2
+	// rand.Int64N panics on n<=0; the d>0 guard above keeps us safe.
+	// math/rand/v2 is the right tool here -- the jitter only needs to
+	// decorrelate retries across goroutines, not resist prediction.
+	return half + time.Duration(rand.Int64N(int64(d))) //nolint:gosec // non-cryptographic jitter
 }
 
 // WaitForBackgroundTasks blocks until every recordClick goroutine
