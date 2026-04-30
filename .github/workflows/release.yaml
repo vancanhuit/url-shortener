@@ -1,0 +1,169 @@
+# Release pipeline.
+#
+# Triggered by pushing a semver tag of the form `v1.2.3` or `v1.2.3-beta1`.
+# Produces, in parallel where it can:
+#
+#   1. A multi-arch (linux/amd64 + linux/arm64) container image published
+#      to GHCR under tags :MAJOR, :MAJOR.MINOR, :MAJOR.MINOR.PATCH and
+#      :latest (the latter only on stable, non-prerelease tags).
+#
+#   2. Cross-compiled binary archives for linux/{amd64,arm64} and
+#      darwin/{amd64,arm64} plus a SHA256SUMS file, uploaded as GitHub
+#      Release assets.
+#
+#   3. A GitHub Release whose body is the auto-generated changelog
+#      between the previous tag and the new one, grouped by
+#      conventional-commit type. Marked as a prerelease when the tag has
+#      a `-suffix` (e.g. v1.2.3-beta1).
+#
+# The image build runs first; the release job depends on it so we never
+# publish a release whose image push silently failed. Both jobs check
+# out with fetch-depth: 0 so `git describe` and `git log` see the full
+# history.
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"          # v1.2.3
+      - "v[0-9]+.[0-9]+.[0-9]+-*"        # v1.2.3-beta1, v1.2.3-rc.1, ...
+
+permissions:
+  contents: read
+
+# Two concurrent runs for the same tag would race on the GH Release
+# create + asset upload. Different tags are independent.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: 1.26.2
+  NODE_VERSION: 24.14.1
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  # Opt every JS-based action into the Node 24 runtime ahead of the
+  # June 2026 deadline. Mirrors ci.yaml; see that file for the full
+  # rationale.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  image:
+    name: docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Strip the leading `v` from the tag so the binary's `version`
+      # subcommand reports semver-canonical "1.2.3" rather than "v1.2.3".
+      # Done as a step so the value is reusable in build-args below.
+      - name: Resolve version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # docker/metadata-action turns `refs/tags/v1.2.3` into the
+      # canonical set of semver image tags (1.2.3, 1.2, 1, latest).
+      # `:latest` is moved only on stable (non-prerelease) tags, so
+      # pushing v1.2.3-beta1 publishes :1.2.3-beta1 without touching
+      # the stable pointer. The dev counterpart (:edge) is moved by
+      # the ci.yaml `image` job on every main push.
+      - name: Derive image tags + labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.repository.pushed_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: github release
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # `just release-binaries` depends on `just web-build`, which runs
+      # `npm ci` in web/tailwind/. Same setup pattern as the ci workflow.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/tailwind/package-lock.json
+
+      - uses: extractions/setup-just@v4
+
+      # The Justfile reads VERSION from `git describe --tags`, which on a
+      # tag push reports e.g. `1.2.3` (the leading `v` is stripped by the
+      # sed pipe in the Justfile). The release-binaries recipe emits
+      # url-shortener_${VERSION}_${os}_${arch}.tar.gz under ./dist along
+      # with SHA256SUMS.
+      - name: Build release binaries
+        run: just release-binaries
+
+      # Resolve the immediately-preceding semver tag so the changelog
+      # range is "(prev_tag, this_tag]". On the very first release there
+      # is no previous tag; fall back to the root commit so the body
+      # captures everything ever shipped.
+      - name: Resolve previous tag
+        id: prev
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${{ github.ref_name }}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          echo "ref=$prev" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        run: just changelog "${{ steps.prev.outputs.ref }}" "${{ github.ref_name }}" > dist/CHANGELOG.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: dist/CHANGELOG.md
+          # The leading `-` in the tag (e.g. v1.2.3-beta1) marks it as
+          # a prerelease per semver; Releases-page UX hides these from
+          # "Latest release".
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/url-shortener_*.tar.gz
+            dist/SHA256SUMS

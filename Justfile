@@ -131,16 +131,53 @@ commitlint-last:
 commitlint-msg MSG:
     @echo {{quote(MSG)}} | npx --no -- commitlint
 
-# Print commits since a given tag, grouped by conventional-commit type.
-# Usage: just changelog-since v0.1.0
-changelog-since TAG:
-    @echo "## Changes since {{TAG}}"
-    @git log {{TAG}}..HEAD --pretty='format:%s' | sort -u | awk -F: ' \
-        /^feat(\(.+\))?!?: / {print "\n### Features";   print "- " $0; next} \
-        /^fix(\(.+\))?!?: /  {print "\n### Fixes";      print "- " $0; next} \
-        /^perf(\(.+\))?!?: / {print "\n### Performance";print "- " $0; next} \
-        /^docs(\(.+\))?!?: / {print "\n### Docs";       print "- " $0; next} \
-        {print "\n### Other"; print "- " $0}'
+# Generate a release-notes markdown body for commits in (FROM, TO], grouped
+# by conventional-commit type. The release workflow pipes this into the GH
+# Release body when a new tag is pushed; it's also handy locally to preview
+# what a release would say.
+#
+# Usage:
+#   just changelog v0.1.0            # since v0.1.0, up to HEAD
+#   just changelog v0.1.0 v0.2.0     # between two tags
+changelog FROM TO="HEAD":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    feats=()
+    fixes=()
+    perfs=()
+    refacs=()
+    docs_=()
+    others=()
+
+    # `tformat:` (vs `format:`) terminates every line with a newline so
+    # `read` doesn't drop the final entry when the range has a single
+    # commit. `--reverse` so the per-type lists read chronologically.
+    while IFS= read -r line; do
+        case "$line" in
+            "feat:"*|"feat("*)         feats+=("$line") ;;
+            "fix:"*|"fix("*)           fixes+=("$line") ;;
+            "perf:"*|"perf("*)         perfs+=("$line") ;;
+            "refactor:"*|"refactor("*) refacs+=("$line") ;;
+            "docs:"*|"docs("*)         docs_+=("$line") ;;
+            "build:"*|"build("*|"chore:"*|"chore("*|"ci:"*|"ci("*|"style:"*|"style("*|"test:"*|"test("*) others+=("$line") ;;
+        esac
+    done < <(git log {{FROM}}..{{TO}} --pretty='tformat:%s' --reverse)
+
+    section() {
+        local title="$1"; shift
+        if [ "$#" -gt 0 ]; then
+            printf '\n### %s\n\n' "$title"
+            for it in "$@"; do printf -- '- %s\n' "$it"; done
+        fi
+    }
+
+    section "Features"    "${feats[@]+"${feats[@]}"}"
+    section "Bug Fixes"   "${fixes[@]+"${fixes[@]}"}"
+    section "Performance" "${perfs[@]+"${perfs[@]}"}"
+    section "Refactors"   "${refacs[@]+"${refacs[@]}"}"
+    section "Docs"        "${docs_[@]+"${docs_[@]}"}"
+    section "Other"       "${others[@]+"${others[@]}"}"
 
 # --- Docker / compose ---------------------------------------------------------
 
@@ -153,6 +190,50 @@ docker-build:
         -t url-shortener:{{VERSION}} \
         -t url-shortener:dev \
         .
+
+# Cross-compile the binary for linux/darwin x amd64/arm64 into ./dist,
+# packaging each as a tar.gz with the binary at the root and a
+# README.md alongside it. A SHA256SUMS file is emitted for the whole
+# set so consumers can verify downloads. The release workflow uploads
+# the tarballs + checksums as GitHub Release assets.
+#
+# `web-build` runs once before the cross-compile loop so all four
+# binaries embed the same Tailwind / htmx assets.
+#
+# Usage:
+#   just release-binaries           # uses {{VERSION}}
+#   just release-binaries 1.2.3     # explicit version override
+release-binaries V=VERSION: web-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    version="{{V}}"
+    out=dist
+    rm -rf "$out"
+    mkdir -p "$out"
+
+    ldflags="-s -w \
+        -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=${version} \
+        -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit={{COMMIT}} \
+        -X github.com/vancanhuit/url-shortener/internal/buildinfo.date={{DATE}}"
+
+    for plat in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+        os="${plat%/*}"
+        arch="${plat#*/}"
+        stem="url-shortener_${version}_${os}_${arch}"
+        stage="$out/$stem"
+        mkdir -p "$stage"
+        echo ">> $plat -> $stage/url-shortener"
+        CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+            go build -trimpath -ldflags="$ldflags" \
+                -o "$stage/url-shortener" ./cmd/url-shortener
+        cp README.md "$stage/"
+        tar -C "$out" -czf "$out/${stem}.tar.gz" "$stem"
+        rm -rf "$stage"
+    done
+
+    (cd "$out" && sha256sum *.tar.gz > SHA256SUMS)
+    ls -lh "$out"
 
 # Multi-arch build for linux/amd64 + linux/arm64. By default loads nothing
 # (buildx cannot --load multi-arch into the local daemon); pass `true`

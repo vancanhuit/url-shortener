@@ -193,6 +193,46 @@ web/tailwind/             tailwind v4 toolchain (npm)                    (presen
 .dagger/                  dagger module (Go SDK)
 ```
 
+## Releases
+
+### Tagged releases
+
+Pushing a `v*` semver tag triggers `.github/workflows/release.yaml` and
+publishes:
+
+- **Container images** to `ghcr.io/vancanhuit/url-shortener` for
+  linux/amd64 + linux/arm64. Tags: `:1.2.3`, `:1.2`, `:1`, plus
+  `:latest` on stable (non-prerelease) tags. Pre-releases like
+  `v1.2.3-beta1` publish only `:1.2.3-beta1` and don't move `:latest`.
+- **Binary archives** `url-shortener_<version>_<os>_<arch>.tar.gz` for
+  linux + darwin on both architectures, attached to the matching
+  GitHub Release alongside `SHA256SUMS`.
+
+See `CONTRIBUTING.md` for the tag-and-push flow that produces them.
+
+### Development builds
+
+The CI workflow publishes a dev image on every push to `main` so you
+can pull the bleeding edge without waiting for a release tag:
+
+| Tag | When updated | Use case |
+| --- | --- | --- |
+| `:edge` | every push to `main` | floating dev pointer |
+| `:main-<short_sha>` | every push to `main` | pin to a specific commit |
+
+Pull-request runs do **not** push to GHCR. Instead they upload two
+artifacts to the workflow run that you can grab from the Actions UI:
+
+- `binaries-pr-<N>` -- `url-shortener_<version>_<os>_<arch>.tar.gz`
+  for all four platforms, plus `SHA256SUMS`.
+- `oci-image-pr-<N>` -- a single multi-arch OCI tarball; load it with
+  `docker load -i url-shortener-oci.tar`.
+
+The binary embeds a `git describe` version string of the form
+`<latest_tag>-<N>-g<sha>` (or just `<sha>` when no tags exist yet),
+so `url-shortener version` always identifies which commit produced
+a given build, regardless of where it came from.
+
 ## License
 
 To be added.

@@ -59,8 +59,40 @@ footer.
 - PRs are **squash-merged**, so the merge commit on `main` is itself a valid
   conventional commit. The PR title is enforced to follow the same format.
 - Tag releases follow semantic versioning: `vMAJOR.MINOR.PATCH`, optionally
-  `-rc.N` for pre-releases. CI rejects tags that do not match
-  `^v\d+\.\d+\.\d+(-[a-z0-9.]+)?$`.
+  `-rc.N` for pre-releases. The release workflow's tag pattern matches
+  `v[0-9]+.[0-9]+.[0-9]+` and `v[0-9]+.[0-9]+.[0-9]+-*`.
+
+## Cutting a release
+
+Releases are tag-driven. Pushing a semver tag to `main` triggers
+`.github/workflows/release.yaml`, which:
+
+1. Builds and pushes a multi-arch (linux/amd64 + linux/arm64) image to
+   `ghcr.io/<owner>/url-shortener` with the canonical set of tags
+   (`X.Y.Z`, `X.Y`, `X`, plus `latest` on stable releases only).
+2. Cross-compiles binary archives for linux/{amd64,arm64} and
+   darwin/{amd64,arm64}, plus a `SHA256SUMS` file.
+3. Creates a GitHub Release whose body is the auto-generated changelog
+   between the previous tag and the new one, grouping commits by
+   conventional-commit type. Tags with a `-suffix` (e.g.
+   `v1.2.3-beta1`) are marked as prereleases.
+
+To cut a release locally:
+
+```sh
+# 1. Make sure main is green and you're up to date.
+git checkout main && git pull --ff-only
+
+# 2. Preview what the release notes will say.
+just changelog "$(git describe --tags --abbrev=0 --match 'v[0-9]*')" HEAD
+
+# 3. Tag and push. The workflow takes it from there.
+git tag -a v1.2.3 -m "v1.2.3"
+git push origin v1.2.3
+```
+
+Use `just release-binaries 1.2.3` to produce the same archives locally
+under `./dist/` (handy for smoke-testing before tagging).
 
 ## Code quality
 

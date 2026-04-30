@@ -1,0 +1,86 @@
+# Dependabot configuration -- weekly bumps for every ecosystem we ship.
+# Docs: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# Conventions:
+#   - Weekly schedule on Monday so updates batch into one review window.
+#   - `chore(deps)` / `chore(deps-dev)` commit prefixes match our
+#     conventional-commits config (commitlint.config.mjs).
+#   - Minor + patch updates are grouped per-ecosystem so a typical week
+#     produces one PR per group instead of N PRs. Major-version bumps
+#     stay separate so they get individual review attention.
+
+version: 2
+
+updates:
+  # Go modules (go.mod at the repo root).
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      gomod-minor-and-patch:
+        update-types: [minor, patch]
+
+  # GitHub Actions referenced from .github/workflows/*.yaml (e.g. the
+  # docker/* and actions/* pinned versions).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Root npm tooling: husky + commitlint.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      npm-root-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Tailwind v4 + htmx toolchain that produces the embedded web assets.
+  - package-ecosystem: npm
+    directory: /web/tailwind
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      npm-tailwind-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Base images referenced by FROM ... in Dockerfile (golang, node,
+  # distroless). Major bumps (e.g. golang 1.26 -> 1.27) come as
+  # individual PRs so we can validate them against the test suite.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      docker-minor-and-patch:
+        update-types: [minor, patch]
