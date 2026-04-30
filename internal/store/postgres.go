@@ -36,11 +36,23 @@ type DBTX interface {
 }
 
 // Link is a row from the `links` table.
+//
+// ExpiresAt is nil when the link never expires; callers must use a
+// pointer rather than the zero time so "never" and "epoch" stay
+// distinguishable through encoding/json.
 type Link struct {
-	ID        int64
-	Code      string
-	TargetURL string
-	CreatedAt time.Time
+	ID         int64
+	Code       string
+	TargetURL  string
+	CreatedAt  time.Time
+	ClickCount int64
+	ExpiresAt  *time.Time
+}
+
+// IsExpired reports whether the link has an expiry set and that expiry
+// is in the past. A nil ExpiresAt always returns false ("never expires").
+func (l Link) IsExpired() bool {
+	return l.ExpiresAt != nil && time.Now().After(*l.ExpiresAt)
 }
 
 // Store is the entry point for all DB access. It owns a pgx pool which it
@@ -78,20 +90,21 @@ func (s *Store) Close() {
 // DBTX argument to store methods.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// CreateLink inserts a new link row. It returns ErrCodeTaken when the code
-// collides with an existing row.
-func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string) (Link, error) {
+// CreateLink inserts a new link row. expiresAt may be nil for a link
+// that never expires. It returns ErrCodeTaken when the code collides
+// with an existing row.
+func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string, expiresAt *time.Time) (Link, error) {
 	if db == nil {
 		db = s.pool
 	}
 	const q = `
-		INSERT INTO links (code, target_url)
-		VALUES ($1, $2)
-		RETURNING id, code, target_url, created_at
+		INSERT INTO links (code, target_url, expires_at)
+		VALUES ($1, $2, $3)
+		RETURNING id, code, target_url, created_at, click_count, expires_at
 	`
 	var l Link
-	err := db.QueryRow(ctx, q, code, targetURL).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt)
+	err := db.QueryRow(ctx, q, code, targetURL, expiresAt).
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -100,6 +113,23 @@ func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string)
 		return Link{}, fmt.Errorf("store: create link: %w", err)
 	}
 	return l, nil
+}
+
+// IncrementClicks bumps the click counter on the link with the given
+// code by one. Best-effort: a missing row returns nil (the caller is
+// the redirect handler, which has already verified the row exists, so
+// a concurrent delete -- if one is ever added -- shouldn't surface as
+// an error to the user). Real DB errors are returned so the caller can
+// log them.
+func (s *Store) IncrementClicks(ctx context.Context, db DBTX, code string) error {
+	if db == nil {
+		db = s.pool
+	}
+	const q = `UPDATE links SET click_count = click_count + 1 WHERE code = $1`
+	if _, err := db.Exec(ctx, q, code); err != nil {
+		return fmt.Errorf("store: increment clicks: %w", err)
+	}
+	return nil
 }
 
 // ListLinks returns up to limit links ordered by id DESC (newest first).
@@ -127,7 +157,7 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 	)
 	if beforeID > 0 {
 		const q = `
-			SELECT id, code, target_url, created_at
+			SELECT id, code, target_url, created_at, click_count, expires_at
 			FROM links
 			WHERE id < $1
 			ORDER BY id DESC
@@ -136,7 +166,7 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 		rows, err = db.Query(ctx, q, beforeID, limit)
 	} else {
 		const q = `
-			SELECT id, code, target_url, created_at
+			SELECT id, code, target_url, created_at, click_count, expires_at
 			FROM links
 			ORDER BY id DESC
 			LIMIT $1
@@ -151,7 +181,7 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 	out := make([]Link, 0, limit)
 	for rows.Next() {
 		var l Link
-		if err := rows.Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("store: list links: scan: %w", err)
 		}
 		out = append(out, l)
@@ -163,19 +193,20 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 }
 
 // GetLinkByCode looks up a link by its short code. Returns ErrNotFound when
-// the row is missing.
+// the row is missing. Expired rows are still returned so callers can
+// distinguish 410 from 404 themselves; check Link.IsExpired.
 func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, error) {
 	if db == nil {
 		db = s.pool
 	}
 	const q = `
-		SELECT id, code, target_url, created_at
+		SELECT id, code, target_url, created_at, click_count, expires_at
 		FROM links
 		WHERE code = $1
 	`
 	var l Link
 	err := db.QueryRow(ctx, q, code).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt)
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Link{}, ErrNotFound
@@ -185,13 +216,18 @@ func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, 
 	return l, nil
 }
 
-// GetLinkByTargetURL returns the oldest existing link with the exact
-// target_url. Used by the API to dedupe auto-generated codes -- if the
-// caller is shortening a URL that's already in the table, return its
-// existing code instead of minting a new one. Multiple rows can legally
-// share a target (a user-supplied code is allowed even when an
-// auto-generated row already covers the same target), so we deliberately
-// pick the oldest by id ASC for stable behaviour.
+// GetLinkByTargetURL returns the oldest non-expired permanent link with
+// the exact target_url. Used by the API to dedupe auto-generated codes
+// -- if the caller is shortening a URL that's already in the table,
+// return its existing code instead of minting a new one.
+//
+// Rows that have an expiry set (whether or not yet past) are excluded
+// so dedup never reuses an ephemeral link as if it were permanent;
+// callers asking for an expiring code already opt out of dedup at the
+// handler layer. Multiple permanent rows can legally share a target
+// (a user-supplied code is allowed even when an auto-generated row
+// already covers the same target), so we deliberately pick the oldest
+// by id ASC for stable behaviour.
 //
 // Returns ErrNotFound when no row matches.
 func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL string) (Link, error) {
@@ -199,15 +235,16 @@ func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL strin
 		db = s.pool
 	}
 	const q = `
-		SELECT id, code, target_url, created_at
+		SELECT id, code, target_url, created_at, click_count, expires_at
 		FROM links
 		WHERE target_url = $1
+		  AND expires_at IS NULL
 		ORDER BY id ASC
 		LIMIT 1
 	`
 	var l Link
 	err := db.QueryRow(ctx, q, targetURL).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt)
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Link{}, ErrNotFound

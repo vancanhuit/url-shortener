@@ -52,7 +52,7 @@ func TestCreateAndGetLink(t *testing.T) {
 	ctx := t.Context()
 	code := uniqueCode(t)
 
-	created, err := s.CreateLink(ctx, nil, code, "https://example.com/x")
+	created, err := s.CreateLink(ctx, nil, code, "https://example.com/x", nil)
 	if err != nil {
 		t.Fatalf("CreateLink: %v", err)
 	}
@@ -88,14 +88,14 @@ func TestCreateLink_DuplicateCodeReturnsErrCodeTaken(t *testing.T) {
 	ctx := t.Context()
 	code := uniqueCode(t)
 
-	if _, err := s.CreateLink(ctx, nil, code, "https://example.com/a"); err != nil {
+	if _, err := s.CreateLink(ctx, nil, code, "https://example.com/a", nil); err != nil {
 		t.Fatalf("first CreateLink: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, code)
 	})
 
-	_, err := s.CreateLink(ctx, nil, code, "https://example.com/b")
+	_, err := s.CreateLink(ctx, nil, code, "https://example.com/b", nil)
 	if !errors.Is(err, store.ErrCodeTaken) {
 		t.Errorf("err = %v, want ErrCodeTaken", err)
 	}
@@ -121,11 +121,11 @@ func TestGetLinkByTargetURL_ReturnsOldestMatchOrNotFound(t *testing.T) {
 	suffix := uniqueCode(t)
 	target := "https://example.com/get-by-target/" + suffix
 
-	first, err := s.CreateLink(ctx, nil, "p"+suffix, target)
+	first, err := s.CreateLink(ctx, nil, "p"+suffix, target, nil)
 	if err != nil {
 		t.Fatalf("CreateLink first: %v", err)
 	}
-	if _, err := s.CreateLink(ctx, nil, "q"+suffix, target); err != nil {
+	if _, err := s.CreateLink(ctx, nil, "q"+suffix, target, nil); err != nil {
 		t.Fatalf("CreateLink second: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestListLinks_OrdersAndPaginates(t *testing.T) {
 	codes := []string{"a" + suffix, "b" + suffix, "c" + suffix}
 	ids := make([]int64, len(codes))
 	for i, code := range codes {
-		l, err := s.CreateLink(ctx, nil, code, "https://example.com/list/"+code)
+		l, err := s.CreateLink(ctx, nil, code, "https://example.com/list/"+code, nil)
 		if err != nil {
 			t.Fatalf("CreateLink %q: %v", code, err)
 		}
@@ -187,6 +187,67 @@ func TestListLinks_OrdersAndPaginates(t *testing.T) {
 	}
 }
 
+// TestCreateAndIncrementClicks verifies that IncrementClicks bumps the
+// counter atomically (multiple invocations sum) and that the new value
+// is observable via GetLinkByCode.
+func TestCreateAndIncrementClicks(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+	code := uniqueCode(t)
+
+	if _, err := s.CreateLink(ctx, nil, code, "https://example.com/clicks/"+code, nil); err != nil {
+		t.Fatalf("CreateLink: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, code)
+	})
+
+	for i := 0; i < 3; i++ {
+		if err := s.IncrementClicks(ctx, nil, code); err != nil {
+			t.Fatalf("IncrementClicks: %v", err)
+		}
+	}
+	got, err := s.GetLinkByCode(ctx, nil, code)
+	if err != nil {
+		t.Fatalf("GetLinkByCode: %v", err)
+	}
+	if got.ClickCount != 3 {
+		t.Errorf("ClickCount = %d, want 3", got.ClickCount)
+	}
+}
+
+// TestCreateLinkWithExpiry_RoundTripsAndDedupExcludes verifies that
+// CreateLink persists a non-nil expires_at, GetLinkByCode echoes it
+// back unchanged, and GetLinkByTargetURL excludes expiring rows from
+// the dedup lookup (per the partial-index / WHERE clause).
+func TestCreateLinkWithExpiry_RoundTripsAndDedupExcludes(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+	code := uniqueCode(t)
+
+	expiresAt := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	target := "https://example.com/expiry/" + code
+	if _, err := s.CreateLink(ctx, nil, code, target, &expiresAt); err != nil {
+		t.Fatalf("CreateLink with expiry: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, code)
+	})
+
+	got, err := s.GetLinkByCode(ctx, nil, code)
+	if err != nil {
+		t.Fatalf("GetLinkByCode: %v", err)
+	}
+	if got.ExpiresAt == nil || !got.ExpiresAt.Equal(expiresAt) {
+		t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, expiresAt)
+	}
+
+	// Dedup must NOT find this row (expires_at IS NOT NULL).
+	if _, err := s.GetLinkByTargetURL(ctx, nil, target); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetLinkByTargetURL on expiring row: err = %v, want ErrNotFound", err)
+	}
+}
+
 // TestTransaction verifies that store methods participate in a caller-managed
 // transaction when a pgx.Tx is passed as the DBTX argument: rolling back the
 // tx must drop the inserted row.
@@ -200,7 +261,7 @@ func TestTransaction_RollbackDiscardsInsert(t *testing.T) {
 		t.Fatalf("BeginTx: %v", err)
 	}
 
-	if _, err := s.CreateLink(ctx, tx, code, "https://example.com/tx"); err != nil {
+	if _, err := s.CreateLink(ctx, tx, code, "https://example.com/tx", nil); err != nil {
 		_ = tx.Rollback(ctx)
 		t.Fatalf("CreateLink in tx: %v", err)
 	}

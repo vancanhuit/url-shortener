@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -33,15 +34,29 @@ const (
 	CacheTTL         = 1 * time.Hour
 	CreateMaxRetries = 5
 	TargetURLMaxLen  = 2048
+
+	// clickTimeout caps how long a fire-and-forget click increment
+	// goroutine may run. Long enough to absorb a momentary stall on
+	// the database, short enough that a permanently degraded DB
+	// can't pin goroutines around forever under sustained traffic.
+	clickTimeout = 5 * time.Second
+
+	// clockSkewGrace is the leniency applied when validating a
+	// caller-supplied expires_at: a few seconds in the past is
+	// accepted to absorb honest skew between a client's wall clock
+	// and the server's. Anything further back is rejected as a
+	// clearly invalid input rather than silently treated as zero.
+	clockSkewGrace = 30 * time.Second
 )
 
 // LinkStore is the storage surface the links handler depends on. It is
 // satisfied by *store.Store; tests use a fake implementation.
 type LinkStore interface {
-	CreateLink(ctx context.Context, db store.DBTX, code, targetURL string) (store.Link, error)
+	CreateLink(ctx context.Context, db store.DBTX, code, targetURL string, expiresAt *time.Time) (store.Link, error)
 	GetLinkByCode(ctx context.Context, db store.DBTX, code string) (store.Link, error)
 	GetLinkByTargetURL(ctx context.Context, db store.DBTX, targetURL string) (store.Link, error)
 	ListLinks(ctx context.Context, db store.DBTX, limit int, beforeID int64) ([]store.Link, error)
+	IncrementClicks(ctx context.Context, db store.DBTX, code string) error
 }
 
 // LinkCache is the cache surface the links handler depends on. It is
@@ -70,6 +85,13 @@ type Links struct {
 	logger   *slog.Logger
 	cacheTTL time.Duration
 	retries  int
+
+	// bgWG tracks fire-and-forget goroutines (currently just the
+	// click-increment background work). Tests use
+	// WaitForBackgroundTasks to wait on it; production never observes
+	// it directly today but the hook is in place for a future graceful
+	// shutdown that wants to drain in-flight clicks.
+	bgWG sync.WaitGroup
 }
 
 // LinksConfig groups Links' constructor arguments. Store, Cache, and
@@ -113,16 +135,23 @@ func (h *Links) Mount(e *echo.Echo) {
 // --- request / response shapes ----------------------------------------------
 
 type createReq struct {
-	TargetURL string `json:"target_url"`
-	Code      string `json:"code,omitempty"`
+	TargetURL string     `json:"target_url"`
+	Code      string     `json:"code,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // LinkResponse is the JSON shape returned by Create and Get.
+//
+// ExpiresAt is omitted entirely (rather than rendered as null) for the
+// common "never expires" case so JSON consumers can distinguish a
+// permanent link with a single key check.
 type LinkResponse struct {
-	Code      string    `json:"code"`
-	ShortURL  string    `json:"short_url"`
-	TargetURL string    `json:"target_url"`
-	CreatedAt time.Time `json:"created_at"`
+	Code       string     `json:"code"`
+	ShortURL   string     `json:"short_url"`
+	TargetURL  string     `json:"target_url"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ClickCount int64      `json:"click_count"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
 // ErrorResponse is the JSON shape returned for any non-2xx response.
@@ -140,28 +169,38 @@ func (e *ValidationError) Error() string { return e.Msg }
 
 // Persist validates the inputs, normalizes the target URL, and either
 // creates a new link or returns an existing one (auto-generated codes
-// only). The returned errors are typed so callers can map them to
-// content-appropriate responses:
+// with no expiry only). The returned errors are typed so callers can
+// map them to content-appropriate responses:
 //
-//   - *ValidationError: bad target_url or user-supplied code -> 422
-//   - store.ErrCodeTaken: duplicate user-supplied code       -> 409
-//   - any other non-nil error: internal failure              -> 500
+//   - *ValidationError: bad target_url, code, or expiry -> 422
+//   - store.ErrCodeTaken: duplicate user-supplied code  -> 409
+//   - any other non-nil error: internal failure         -> 500
+//
+// expiresAt may be nil for a link that never expires. When non-nil it
+// must be in the future. Dedup is suppressed whenever expiresAt is
+// non-nil: an ephemeral request should never silently extend the
+// lifetime of an existing permanent row, and the store layer already
+// excludes expiring rows from the dedup lookup so the converse holds
+// too.
 //
 // The boolean `created` is true when a new row was inserted and false
 // when an existing row was reused (which only happens when userCode is
-// empty and the normalized target is already present); JSON callers
-// translate this into 201 vs 200.
+// empty AND expiresAt is nil AND a permanent row already covers the
+// normalized target); JSON callers translate this into 201 vs 200.
 //
 // Note: dedup is best-effort. Two simultaneous requests for the same new
 // target may both miss the lookup and both insert; this is no worse than
 // today's behaviour and avoids needing a unique constraint that would
 // conflict with user-supplied-code semantics.
-func (h *Links) Persist(ctx context.Context, target, userCode string) (link store.Link, created bool, err error) {
+func (h *Links) Persist(ctx context.Context, target, userCode string, expiresAt *time.Time) (link store.Link, created bool, err error) {
 	if err := validateTargetURL(target); err != nil {
 		return store.Link{}, false, &ValidationError{Msg: err.Error()}
 	}
 	norm, err := normalizeURL(target)
 	if err != nil {
+		return store.Link{}, false, &ValidationError{Msg: err.Error()}
+	}
+	if err := validateExpiresAt(expiresAt); err != nil {
 		return store.Link{}, false, &ValidationError{Msg: err.Error()}
 	}
 
@@ -172,7 +211,7 @@ func (h *Links) Persist(ctx context.Context, target, userCode string) (link stor
 					shortener.MinLength, shortener.MaxLength),
 			}
 		}
-		link, err = h.store.CreateLink(ctx, nil, userCode, norm)
+		link, err = h.store.CreateLink(ctx, nil, userCode, norm, expiresAt)
 		if err != nil {
 			return store.Link{}, false, err
 		}
@@ -180,16 +219,21 @@ func (h *Links) Persist(ctx context.Context, target, userCode string) (link stor
 		return link, true, nil
 	}
 
-	// Auto-generated path: dedup on the normalized target first.
-	existing, lookupErr := h.store.GetLinkByTargetURL(ctx, nil, norm)
-	if lookupErr == nil {
-		return existing, false, nil
-	}
-	if !errors.Is(lookupErr, store.ErrNotFound) {
-		return store.Link{}, false, lookupErr
+	// Auto-generated path: only dedup permanent requests against
+	// permanent existing rows. The store already filters the
+	// existing-side condition (expires_at IS NULL); we enforce the
+	// requesting-side here.
+	if expiresAt == nil {
+		existing, lookupErr := h.store.GetLinkByTargetURL(ctx, nil, norm)
+		if lookupErr == nil {
+			return existing, false, nil
+		}
+		if !errors.Is(lookupErr, store.ErrNotFound) {
+			return store.Link{}, false, lookupErr
+		}
 	}
 
-	link, err = h.createWithRandomCode(ctx, norm)
+	link, err = h.createWithRandomCode(ctx, norm, expiresAt)
 	if err != nil {
 		return store.Link{}, false, err
 	}
@@ -243,7 +287,7 @@ func (h *Links) Create(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid json body"})
 	}
 
-	link, created, err := h.Persist(c.Request().Context(), req.TargetURL, req.Code)
+	link, created, err := h.Persist(c.Request().Context(), req.TargetURL, req.Code, req.ExpiresAt)
 	var verr *ValidationError
 	switch {
 	case errors.As(err, &verr):
@@ -265,13 +309,13 @@ func (h *Links) Create(c *echo.Context) error {
 // unique-collision. After h.retries failed attempts it gives up: that
 // implies either an exhausted keyspace or a degenerate generator and
 // should surface as a 500.
-func (h *Links) createWithRandomCode(ctx context.Context, target string) (store.Link, error) {
+func (h *Links) createWithRandomCode(ctx context.Context, target string, expiresAt *time.Time) (store.Link, error) {
 	for i := 0; i < h.retries; i++ {
 		code, err := h.gen.Generate()
 		if err != nil {
 			return store.Link{}, fmt.Errorf("generate code: %w", err)
 		}
-		l, err := h.store.CreateLink(ctx, nil, code, target)
+		l, err := h.store.CreateLink(ctx, nil, code, target, expiresAt)
 		if errors.Is(err, store.ErrCodeTaken) {
 			h.logger.Warn("links: code collision; retrying", "attempt", i+1, "code", code)
 			continue
@@ -281,7 +325,10 @@ func (h *Links) createWithRandomCode(ctx context.Context, target string) (store.
 	return store.Link{}, fmt.Errorf("failed to generate unique code after %d attempts", h.retries)
 }
 
-// Get implements GET /api/v1/links/:code.
+// Get implements GET /api/v1/links/:code. Expired links return 410 Gone
+// rather than the response body so clients can distinguish a once-valid
+// code from an unknown one (and so an expired link's metadata --
+// click_count, created_at -- doesn't keep leaking forever).
 func (h *Links) Get(c *echo.Context) error {
 	code := c.Param("code")
 	if !shortener.ValidCode(code) {
@@ -295,11 +342,20 @@ func (h *Links) Get(c *echo.Context) error {
 		h.logger.Error("links: get failed", "error", err, "code", code)
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal error"})
 	}
+	if link.IsExpired() {
+		return c.JSON(http.StatusGone, ErrorResponse{Error: "link has expired"})
+	}
 	return c.JSON(http.StatusOK, h.makeResp(link))
 }
 
-// Redirect implements GET /:code. Tries the cache first, falls back to
-// the store, and back-fills the cache on a hit.
+// Redirect implements GET /r/:code. Tries the cache first, falls back
+// to the store, and back-fills the cache on a hit. Expired links return
+// 410 Gone. Successful redirects fire-and-forget a click increment so
+// the UPDATE never delays the 302.
+//
+// A cache hit is always served as a redirect: cache TTL is clamped to
+// the link's remaining lifetime in cachePut, so anything that survives
+// in the cache is by construction not yet expired.
 func (h *Links) Redirect(c *echo.Context) error {
 	code := c.Param("code")
 	if !shortener.ValidCode(code) {
@@ -308,6 +364,7 @@ func (h *Links) Redirect(c *echo.Context) error {
 	ctx := c.Request().Context()
 
 	if target, ok := h.cacheGet(ctx, code); ok {
+		h.recordClick(code)
 		return c.Redirect(http.StatusFound, target)
 	}
 
@@ -319,9 +376,50 @@ func (h *Links) Redirect(c *echo.Context) error {
 		h.logger.Error("links: redirect lookup failed", "error", err, "code", code)
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
 	}
+	if link.IsExpired() {
+		return echo.NewHTTPError(http.StatusGone, "link has expired")
+	}
 
 	h.cachePut(ctx, link)
+	h.recordClick(link.Code)
 	return c.Redirect(http.StatusFound, link.TargetURL)
+}
+
+// recordClick increments the link's click counter on a detached
+// goroutine so a slow UPDATE -- or an outright DB outage -- never
+// delays the 302 the user is waiting for. The detached context has a
+// short timeout so a permanently stuck DB doesn't leak goroutines
+// without bound. The WaitGroup makes it possible for tests (and a
+// future graceful-shutdown path) to wait for in-flight clicks; in
+// production we don't otherwise observe it.
+func (h *Links) recordClick(code string) {
+	h.bgWG.Add(1)
+	go func() {
+		defer h.bgWG.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
+		defer cancel()
+		if err := h.store.IncrementClicks(ctx, nil, code); err != nil {
+			h.logger.Warn("links: increment clicks failed", "error", err, "code", code)
+		}
+	}()
+}
+
+// WaitForBackgroundTasks blocks until every recordClick goroutine
+// started so far has finished, or until d elapses. Intended for tests
+// that need to assert the click counter advanced. Returns true when
+// every goroutine completed in time.
+func (h *Links) WaitForBackgroundTasks(d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		h.bgWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(d):
+		return false
+	}
 }
 
 // --- cache helpers ----------------------------------------------------------
@@ -339,8 +437,26 @@ func (h *Links) cacheGet(ctx context.Context, code string) (string, bool) {
 	return v, ok
 }
 
+// cachePut stores the link's target under its short-code key with a
+// TTL clamped to the link's remaining lifetime. The clamp guarantees
+// the cache never serves an expired redirect, so the Redirect hot
+// path doesn't have to re-check expiry on every cache hit.
+//
+// A non-positive remaining lifetime (already expired, or expiring
+// within a second) skips the Set entirely: caching a value that is
+// already past its deadline buys nothing and just wastes Redis ops.
 func (h *Links) cachePut(ctx context.Context, l store.Link) {
-	if err := h.cache.Set(ctx, cacheKey(l.Code), l.TargetURL, h.cacheTTL); err != nil {
+	ttl := h.cacheTTL
+	if l.ExpiresAt != nil {
+		remaining := time.Until(*l.ExpiresAt)
+		if remaining <= time.Second {
+			return
+		}
+		if remaining < ttl {
+			ttl = remaining
+		}
+	}
+	if err := h.cache.Set(ctx, cacheKey(l.Code), l.TargetURL, ttl); err != nil {
 		h.logger.Warn("links: cache set failed", "error", err, "code", l.Code)
 	}
 }
@@ -351,11 +467,26 @@ func cacheKey(code string) string { return "link:" + code }
 
 func (h *Links) makeResp(l store.Link) LinkResponse {
 	return LinkResponse{
-		Code:      l.Code,
-		ShortURL:  h.baseURL + "/r/" + l.Code,
-		TargetURL: l.TargetURL,
-		CreatedAt: l.CreatedAt,
+		Code:       l.Code,
+		ShortURL:   h.baseURL + "/r/" + l.Code,
+		TargetURL:  l.TargetURL,
+		CreatedAt:  l.CreatedAt,
+		ClickCount: l.ClickCount,
+		ExpiresAt:  l.ExpiresAt,
 	}
+}
+
+// validateExpiresAt enforces that an explicit expiry is in the future
+// (with a small grace window for honest clock skew between the client
+// and server). A nil pointer means "never expires" and is always OK.
+func validateExpiresAt(t *time.Time) error {
+	if t == nil {
+		return nil
+	}
+	if !t.After(time.Now().Add(-clockSkewGrace)) {
+		return errors.New("expires_at must be in the future")
+	}
+	return nil
 }
 
 // normalizeURL returns a canonical form of target suitable for dedup

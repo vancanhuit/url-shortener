@@ -61,14 +61,20 @@ func NewWeb(cfg WebConfig) *Web {
 // the web package's Static() helper.
 //
 // Routes:
-//   - GET  /         -- form + first page of recent links
-//   - POST /links    -- htmx form target; HTML response
-//   - GET  /recent   -- htmx "Load more" pagination fragment
-//   - GET  /static/* -- embedded css/js
+//   - GET  /                    -- form + first page of recent links
+//   - POST /links               -- htmx form target; HTML response
+//   - GET  /recent              -- htmx "Load more" pagination fragment
+//   - GET  /links/:code/badges  -- htmx polling fragment (clicks + expiry)
+//   - GET  /static/*            -- embedded css/js
 //
 // `POST /links` exists separately from `POST /api/v1/links` because
 // htmx submits `application/x-www-form-urlencoded` and expects an HTML
 // fragment back; both paths share `Links.Persist` underneath.
+//
+// `GET /links/:code/badges` is what each row in the recent list polls
+// every few seconds to refresh its click count + expiry text without
+// touching the rest of the page (so cursor-paginated rows that were
+// appended via Load more are not clobbered).
 //
 // No CSRF protection is applied: the service has no auth concept, so
 // there are no per-user mutations to forge -- the create endpoint is
@@ -77,6 +83,7 @@ func (w *Web) Mount(e *echo.Echo, staticFS fs.FS) {
 	e.GET("/", w.Index)
 	e.POST("/links", w.Create)
 	e.GET("/recent", w.LoadMore)
+	e.GET("/links/:code/badges", w.Badges)
 
 	// Static assets are content-addressed only by filename for now, so we
 	// can't use immutable+long-max-age safely. A modest max-age plus
@@ -111,13 +118,44 @@ func (w *Web) Index(c *echo.Context) error {
 	})
 }
 
+// expiresInPresets enumerates the values the form's "Expires" select
+// is allowed to submit. Keys map to a relative duration; the empty key
+// ("never") means no expiry. Anything outside this set is treated as a
+// validation error so a hand-crafted form can't sneak unbounded
+// expiries through the HTML route.
+var expiresInPresets = map[string]time.Duration{
+	"":    0,
+	"1h":  time.Hour,
+	"1d":  24 * time.Hour,
+	"7d":  7 * 24 * time.Hour,
+	"30d": 30 * 24 * time.Hour,
+}
+
+// resolveExpiresIn maps a form preset to an absolute *time.Time the
+// links service understands. Returns (nil, nil) for the "never" case.
+func resolveExpiresIn(preset string) (*time.Time, error) {
+	d, ok := expiresInPresets[preset]
+	if !ok {
+		return nil, errors.New("invalid expiry option")
+	}
+	if d == 0 {
+		return nil, nil
+	}
+	t := time.Now().Add(d)
+	return &t, nil
+}
+
 // Create handles the HTMX form submission. Returns either a success
 // partial (with an OOB recent-list refresh) or an error partial.
 func (w *Web) Create(c *echo.Context) error {
 	target := strings.TrimSpace(c.FormValue("target_url"))
 	userCode := strings.TrimSpace(c.FormValue("code"))
+	expiresAt, err := resolveExpiresIn(strings.TrimSpace(c.FormValue("expires_in")))
+	if err != nil {
+		return w.renderError(c, http.StatusUnprocessableEntity, err.Error())
+	}
 
-	link, created, err := w.links.Persist(c.Request().Context(), target, userCode)
+	link, created, err := w.links.Persist(c.Request().Context(), target, userCode, expiresAt)
 	var verr *ValidationError
 	switch {
 	case errors.As(err, &verr):
@@ -141,6 +179,32 @@ func (w *Web) Create(c *echo.Context) error {
 		Items:      page,
 		NextCursor: cursor,
 	})
+}
+
+// Badges handles the per-row HTMX polling request. It returns just the
+// badges fragment (`<span>...</span>` containing click count and expiry
+// labels) so each visible row can refresh those two pieces of metadata
+// in place every few seconds.
+//
+// Cache-Control: no-store keeps an intermediary (CDN, browser back/forward
+// cache) from freezing a stale value -- the whole point of the endpoint
+// is that a click that just happened becomes visible on the next poll.
+//
+// Unknown / invalid codes return 204 No Content rather than 404 so HTMX
+// silently swaps in an empty fragment (which collapses the badges) and
+// stops; a 4xx would surface as an htmx:responseError.
+func (w *Web) Badges(c *echo.Context) error {
+	code := c.Param("code")
+	link, err := w.links.Resolve(c.Request().Context(), code)
+	if errors.Is(err, store.ErrNotFound) {
+		return c.NoContent(http.StatusNoContent)
+	}
+	if err != nil {
+		w.logger.Error("web: badges lookup failed", "error", err, "code", code)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return w.render(c, http.StatusOK, "recent-badges", w.links.Response(link))
 }
 
 // LoadMore handles the HTMX "Load more" button. Returns a fragment
