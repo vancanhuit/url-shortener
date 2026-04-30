@@ -13,12 +13,15 @@ package server_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 // waitForReady polls /healthz until it returns 200 or the deadline expires.
@@ -153,16 +156,30 @@ func TestServer_GracefulShutdownClosesListener(t *testing.T) {
 	}
 }
 
-// TestMain runs every test in this file with a small global guard so a hung
-// listener can't keep CI tied up forever.
+// TestMain runs every test in this file with two safety nets: a 60s
+// global watchdog so a hung listener cannot keep CI tied up forever,
+// and a goleak post-condition so any goroutine that escapes graceful
+// shutdown -- a regression in WaitForBackgroundTasks, a stale timer,
+// a pgx pool that wasn't Closed -- fails the run with the offending
+// stack trace.
 func TestMain(m *testing.M) {
 	exit := make(chan int, 1)
 	go func() { exit <- m.Run() }()
+	var code int
 	select {
-	case code := <-exit:
-		os.Exit(code)
+	case code = <-exit:
 	case <-time.After(60 * time.Second):
 		_, _ = os.Stderr.WriteString("server integration tests exceeded 60s\n")
 		os.Exit(1)
 	}
+	if code == 0 {
+		// Only check for leaks on a passing run; on a failure the
+		// already-reported error is more useful than a leak trace
+		// that's likely a downstream effect of the failure.
+		if err := goleak.Find(); err != nil {
+			fmt.Fprintf(os.Stderr, "goleak: leaked goroutines after tests:\n%v\n", err)
+			code = 1
+		}
+	}
+	os.Exit(code)
 }
