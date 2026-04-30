@@ -127,6 +127,29 @@ lint: lint-install web-build tidy
 fmt: lint-install
     "$(go env GOPATH)/bin/golangci-lint" fmt
 
+# Run govulncheck against the source. govulncheck is the official Go
+# vulnerability scanner: it cross-references our deps against the Go
+# vuln database (https://pkg.go.dev/vuln) AND, crucially, only fails
+# when a known-bad symbol is actually reachable from one of our
+# entrypoints -- so a CVE in a function we never call won't break CI.
+# `--build-tags=integration` matches the lint recipe so files behind
+# the integration build tag are also analysed.
+vuln:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Always pull the latest CLI: govulncheck's value is the database
+    # it queries, and the CLI itself rarely sees breaking changes worth
+    # pinning. `go install ... @latest` is a fast no-op when the binary
+    # is already current.
+    gobin="$(go env GOPATH)/bin"
+    GOBIN="$gobin" go install golang.org/x/vuln/cmd/govulncheck@latest
+    # `-show=verbose` makes the per-run module + package inventory
+    # visible in CI logs, so a failed run is easy to triage and a
+    # passing one documents exactly what was scanned (12 root packages,
+    # ~30 modules, and the stdlib at the time of writing).
+    "$gobin/govulncheck" -show=verbose -tags=integration ./...
+
 # Tidy go.mod / go.sum.
 tidy:
     go mod tidy
