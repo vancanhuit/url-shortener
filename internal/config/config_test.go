@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vancanhuit/url-shortener/internal/config"
 )
@@ -79,6 +80,71 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	}
 	if cfg != want {
 		t.Errorf("cfg = %+v\nwant %+v", cfg, want)
+	}
+}
+
+func TestLoad_DBPoolEnvOverrides(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("URL_SHORTENER_DB_MAX_CONNS", "32")
+	t.Setenv("URL_SHORTENER_DB_MIN_CONNS", "4")
+	t.Setenv("URL_SHORTENER_DB_MAX_CONN_LIFETIME", "30m")
+	t.Setenv("URL_SHORTENER_DB_MAX_CONN_IDLE_TIME", "5m")
+	t.Setenv("URL_SHORTENER_DB_HEALTH_CHECK_PERIOD", "15s")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+
+	if cfg.DBMaxConns != 32 {
+		t.Errorf("DBMaxConns = %d, want 32", cfg.DBMaxConns)
+	}
+	if cfg.DBMinConns != 4 {
+		t.Errorf("DBMinConns = %d, want 4", cfg.DBMinConns)
+	}
+	if cfg.DBMaxConnLifetime != 30*time.Minute {
+		t.Errorf("DBMaxConnLifetime = %v, want 30m", cfg.DBMaxConnLifetime)
+	}
+	if cfg.DBMaxConnIdleTime != 5*time.Minute {
+		t.Errorf("DBMaxConnIdleTime = %v, want 5m", cfg.DBMaxConnIdleTime)
+	}
+	if cfg.DBHealthCheckPeriod != 15*time.Second {
+		t.Errorf("DBHealthCheckPeriod = %v, want 15s", cfg.DBHealthCheckPeriod)
+	}
+}
+
+func TestValidate_RejectsBadDBPoolValues(t *testing.T) {
+	t.Parallel()
+
+	const redisOK = "redis://localhost:6379/0"
+	base := func() config.Config {
+		return config.Config{
+			Env: "prod", Addr: ":8080", BaseURL: "x",
+			LogLevel: "info", LogFormat: "json", RedisURL: redisOK,
+		}
+	}
+
+	cases := map[string]func(*config.Config){
+		"negative max": func(c *config.Config) { c.DBMaxConns = -1 },
+		"negative min": func(c *config.Config) { c.DBMinConns = -1 },
+		"min greater": func(c *config.Config) {
+			c.DBMaxConns = 5
+			c.DBMinConns = 10
+		},
+		"negative lifetime":  func(c *config.Config) { c.DBMaxConnLifetime = -time.Second },
+		"negative idle":      func(c *config.Config) { c.DBMaxConnIdleTime = -time.Second },
+		"negative healthchk": func(c *config.Config) { c.DBHealthCheckPeriod = -time.Second },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := base()
+			mutate(&c)
+			if err := c.Validate(); err == nil {
+				t.Errorf("Validate() returned nil; want error")
+			}
+		})
 	}
 }
 

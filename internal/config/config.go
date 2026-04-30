@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -58,6 +59,17 @@ type Config struct {
 	// CodeLength is the length of auto-generated short codes. Validated by
 	// the shortener package: must be in [shortener.MinLength, MaxLength].
 	CodeLength int `mapstructure:"code_length" json:"code_length"`
+
+	// Postgres connection-pool tunables. All zero by default, in which
+	// case pgx's own defaults apply. See store.PoolConfig for the
+	// per-knob semantics. Production deployments typically want at
+	// least DBMaxConns set above pgx's default of max(4, NumCPU) to
+	// absorb burst load without queueing requests on the pool.
+	DBMaxConns          int32         `mapstructure:"db_max_conns"           json:"db_max_conns"`
+	DBMinConns          int32         `mapstructure:"db_min_conns"           json:"db_min_conns"`
+	DBMaxConnLifetime   time.Duration `mapstructure:"db_max_conn_lifetime"   json:"db_max_conn_lifetime"`
+	DBMaxConnIdleTime   time.Duration `mapstructure:"db_max_conn_idle_time"  json:"db_max_conn_idle_time"`
+	DBHealthCheckPeriod time.Duration `mapstructure:"db_health_check_period" json:"db_health_check_period"`
 }
 
 // Load reads the configuration from environment variables and applies the
@@ -74,6 +86,9 @@ func Load() (Config, error) {
 	for _, key := range []string{
 		"env", "addr", "base_url", "log_level", "log_format",
 		"database_url", "redis_url", "auto_migrate", "code_length",
+		"db_max_conns", "db_min_conns",
+		"db_max_conn_lifetime", "db_max_conn_idle_time",
+		"db_health_check_period",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -138,6 +153,29 @@ func (c Config) Validate() error {
 	// to start instead of silently degrading.
 	if c.RedisURL == "" {
 		return fmt.Errorf("config: redis_url must not be empty")
+	}
+
+	// Pool tunables: any explicit value must be non-negative; when both
+	// MinConns and MaxConns are set, MinConns must not exceed MaxConns.
+	// Zero is the "leave pgx default" sentinel and is always allowed.
+	if c.DBMaxConns < 0 {
+		return fmt.Errorf("config: db_max_conns must be >= 0")
+	}
+	if c.DBMinConns < 0 {
+		return fmt.Errorf("config: db_min_conns must be >= 0")
+	}
+	if c.DBMaxConns > 0 && c.DBMinConns > c.DBMaxConns {
+		return fmt.Errorf("config: db_min_conns (%d) must not exceed db_max_conns (%d)",
+			c.DBMinConns, c.DBMaxConns)
+	}
+	if c.DBMaxConnLifetime < 0 {
+		return fmt.Errorf("config: db_max_conn_lifetime must be >= 0")
+	}
+	if c.DBMaxConnIdleTime < 0 {
+		return fmt.Errorf("config: db_max_conn_idle_time must be >= 0")
+	}
+	if c.DBHealthCheckPeriod < 0 {
+		return fmt.Errorf("config: db_health_check_period must be >= 0")
 	}
 	return nil
 }
