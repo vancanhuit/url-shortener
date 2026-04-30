@@ -208,6 +208,107 @@ func TestLinksAPI_UnknownCodeReturns404(t *testing.T) {
 	}
 }
 
+// TestServer_GracefulShutdownDrainsBackgroundTasks proves that a click
+// fired by a request right before SIGTERM is committed before Serve
+// returns, rather than dropped along with the process. Setup is
+// inlined (rather than reusing startFullServer) because the assertion
+// has to read the underlying store *after* the server has stopped,
+// which startFullServer's t.Cleanup ordering doesn't expose cleanly.
+func TestServer_GracefulShutdownDrainsBackgroundTasks(t *testing.T) {
+	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("URL_SHORTENER_TEST_DATABASE_URL not set; skipping integration test")
+	}
+	redisURL := os.Getenv("URL_SHORTENER_TEST_REDIS_URL")
+	if redisURL == "" {
+		t.Skip("URL_SHORTENER_TEST_REDIS_URL not set; skipping integration test")
+	}
+
+	ctx := t.Context()
+	st, err := store.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+
+	cc, err := cache.New(ctx, redisURL)
+	if err != nil {
+		t.Fatalf("cache.New: %v", err)
+	}
+	defer func() { _ = cc.Close() }()
+
+	gen, err := shortener.NewGenerator(shortener.DefaultLength)
+	if err != nil {
+		t.Fatalf("shortener.NewGenerator: %v", err)
+	}
+
+	cfg := config.Config{
+		Env:        config.EnvDev,
+		Addr:       "127.0.0.1:0",
+		BaseURL:    "http://short.test",
+		LogLevel:   "info",
+		LogFormat:  "text",
+		RedisURL:   redisURL,
+		CodeLength: shortener.DefaultLength,
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := server.New(cfg, logger, server.Deps{Store: st, Cache: cc, Generator: gen})
+
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(runCtx, ln) }()
+
+	base := "http://" + ln.Addr().String()
+	waitForReady(t, base+"/healthz")
+
+	// Seed a link so the redirect has somewhere to point. CreateLink
+	// inserts directly to skip the API layer (and its async paths).
+	target := "https://example.com/drain/" + randomSuffix(t)
+	link, err := st.CreateLink(ctx, nil, "drn"+randomSuffix(t)[:4], target, nil)
+	if err != nil {
+		t.Fatalf("CreateLink: %v", err)
+	}
+
+	// Fire the redirect. The handler returns 302 immediately and the
+	// click counter increment runs on a background goroutine that
+	// the server's drain logic must wait for.
+	rreq, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/r/"+link.Code, nil)
+	rresp, err := httpClientNoRedirect.Do(rreq)
+	if err != nil {
+		t.Fatalf("redirect: %v", err)
+	}
+	_ = rresp.Body.Close()
+	if rresp.StatusCode != http.StatusFound {
+		t.Fatalf("redirect status = %d", rresp.StatusCode)
+	}
+
+	// Trigger graceful shutdown without giving the goroutine any
+	// extra wall-clock time first; if the drain works we still see
+	// click_count=1 below.
+	cancel()
+	select {
+	case serveErr := <-done:
+		if serveErr != nil {
+			t.Fatalf("Serve returned error: %v", serveErr)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("Serve did not return within 20s of cancellation")
+	}
+
+	got, err := st.GetLinkByCode(ctx, nil, link.Code)
+	if err != nil {
+		t.Fatalf("GetLinkByCode: %v", err)
+	}
+	if got.ClickCount != 1 {
+		t.Errorf("ClickCount = %d after shutdown, want 1 -- drain dropped the increment",
+			got.ClickCount)
+	}
+}
+
 // randomSuffix is a tiny per-test marker so concurrent runs can't share a
 // target URL. Hex of a fresh code is good enough.
 func randomSuffix(t *testing.T) string {
