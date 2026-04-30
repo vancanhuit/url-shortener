@@ -200,9 +200,17 @@ docker-build:
 
 # Cross-compile the binary for linux/darwin x amd64/arm64 into ./dist,
 # packaging each as a tar.gz with the binary at the root and a
-# README.md alongside it. A SHA256SUMS file is emitted for the whole
-# set so consumers can verify downloads. The release workflow uploads
-# the tarballs + checksums as GitHub Release assets.
+# README.md alongside it. Two flavors of checksum are emitted:
+#
+#   - per-archive `<archive>.tar.gz.sha256` -- one line, verifiable
+#     in isolation with `sha256sum -c <file>.tar.gz.sha256`. Handy
+#     when a consumer downloads only one platform's archive.
+#   - aggregate `SHA256SUMS` -- one line per archive, verifiable as
+#     a set with `sha256sum -c SHA256SUMS`. Handy for mirroring or
+#     bulk-verifying everything in one shot.
+#
+# The release workflow uploads the tarballs + both checksum flavors
+# as GitHub Release assets.
 #
 # `web-build` runs once before the cross-compile loop so all four
 # binaries embed the same Tailwind / htmx assets.
@@ -236,6 +244,12 @@ release-binaries V=VERSION: web-build
                 -o "$stage/url-shortener" ./cmd/url-shortener
         cp README.md "$stage/"
         tar -C "$out" -czf "$out/${stem}.tar.gz" "$stem"
+        # Per-archive checksum sits next to the archive so a consumer
+        # who downloads just one platform can verify it without
+        # pulling SHA256SUMS too. Run from $out so the recorded path
+        # is the bare filename, matching how `sha256sum -c` resolves
+        # the target relative to the checksum file's directory.
+        (cd "$out" && sha256sum "${stem}.tar.gz" > "${stem}.tar.gz.sha256")
         rm -rf "$stage"
     done
 
