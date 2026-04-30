@@ -124,11 +124,16 @@ jobs:
   binaries:
     name: binaries
     # Cross-compile the binary for linux/darwin x amd64/arm64 and upload
-    # the resulting tar.gz archives + SHA256SUMS as a workflow artifact
-    # so reviewers can grab a build of the PR without checking out and
-    # rebuilding locally. PR-only -- main pushes don't need this because
-    # consumers there pull the GHCR image instead.
-    if: github.event_name == 'pull_request'
+    # the resulting tar.gz archives + SHA256SUMS as a workflow artifact:
+    #
+    #   - on PR:        binaries-pr-<number>      (7d retention)
+    #   - on main push: binaries-main-<short_sha> (30d retention)
+    #
+    # On PRs the artifact lets reviewers grab a build without checking
+    # out and rebuilding locally. On main, it complements the GHCR
+    # `:edge` / `:main-<sha>` images for users who deploy bare binaries
+    # rather than containers (e.g. systemd hosts), giving them a stable
+    # download URL between tagged releases.
     needs: go
     runs-on: ubuntu-latest
     steps:
@@ -151,15 +156,30 @@ jobs:
       - name: just release-binaries
         run: just release-binaries
 
+      # Pick a name + retention that reflects the trigger so PR and main
+      # artifacts don't collide and main builds stick around long enough
+      # to be useful between tagged releases.
+      - name: Resolve artifact name
+        id: artifact
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "name=binaries-pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "retention=7" >> "$GITHUB_OUTPUT"
+          else
+            short_sha=$(echo "${{ github.sha }}" | cut -c1-7)
+            echo "name=binaries-main-$short_sha" >> "$GITHUB_OUTPUT"
+            echo "retention=30" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload binaries artifact
         uses: actions/upload-artifact@v7
         with:
-          name: binaries-pr-${{ github.event.pull_request.number }}
+          name: ${{ steps.artifact.outputs.name }}
           path: |
             dist/url-shortener_*.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
-          retention-days: 7
+          retention-days: ${{ steps.artifact.outputs.retention }}
 
   image:
     name: docker image
