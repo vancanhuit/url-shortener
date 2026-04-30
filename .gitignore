@@ -31,3 +31,4 @@ node_modules/
 # are missing. CI and the multi-stage Dockerfile do the same.
 /web/static/styles.css
 /web/static/htmx.min.js
+/web/static/copy.js

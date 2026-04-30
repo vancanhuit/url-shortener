@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"bytes"
 	"errors"
 	"html/template"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -57,13 +59,44 @@ func NewWeb(cfg WebConfig) *Web {
 // Mount registers the HTML routes on e and serves the embedded static
 // assets under `/static/`. staticFS should be the rooted FS returned by
 // the web package's Static() helper.
+//
+// Routes:
+//   - GET  /         -- form + first page of recent links
+//   - POST /links    -- htmx form target; HTML response
+//   - GET  /recent   -- htmx "Load more" pagination fragment
+//   - GET  /static/* -- embedded css/js
+//
+// `POST /links` exists separately from `POST /api/v1/links` because
+// htmx submits `application/x-www-form-urlencoded` and expects an HTML
+// fragment back; both paths share `Links.Persist` underneath.
+//
+// No CSRF protection is applied: the service has no auth concept, so
+// there are no per-user mutations to forge -- the create endpoint is
+// effectively a public API. Revisit if accounts / quotas are added.
 func (w *Web) Mount(e *echo.Echo, staticFS fs.FS) {
 	e.GET("/", w.Index)
 	e.POST("/links", w.Create)
 	e.GET("/recent", w.LoadMore)
 
+	// Static assets are content-addressed only by filename for now, so we
+	// can't use immutable+long-max-age safely. A modest max-age plus
+	// must-revalidate keeps the round-trip cheap (304 on If-Modified-Since
+	// is moot because embed.FS reports a zero modtime, but browsers still
+	// honour the freshness window).
 	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
-	e.GET("/static/*", echo.WrapHandler(staticHandler))
+	e.GET("/static/*", echo.WrapHandler(staticCacheHeaders(staticHandler)))
+}
+
+// staticCacheHeaders sets a conservative Cache-Control on every static
+// response. 1h is short enough that a CSS/JS rebuild propagates quickly
+// in dev, long enough to skip the network on intra-session navigation.
+func staticCacheHeaders(next http.Handler) http.Handler {
+	const maxAge = time.Hour
+	header := "public, max-age=" + strconv.Itoa(int(maxAge.Seconds()))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", header)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // --- handlers ---------------------------------------------------------------
@@ -143,10 +176,24 @@ type recentPageData struct {
 	NextCursor int64
 }
 
+// render executes the named template into a buffer first, then writes
+// the response. Buffering means a template error (missing field, broken
+// nested template, etc.) surfaces *before* any bytes hit the wire, so we
+// can still escalate to a 500 instead of leaving the client with a
+// half-rendered partial. The HTML payloads here are tiny (~few KB), so
+// the extra allocation is irrelevant.
 func (w *Web) render(c *echo.Context, status int, name string, data any) error {
+	var buf bytes.Buffer
+	if err := w.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		w.logger.Error("web: render template", "template", name, "error", err)
+		// Fall through to a plain-text 500 -- attempting to render
+		// link-error here could trigger the same failure mode.
+		return c.String(http.StatusInternalServerError, "internal error")
+	}
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
 	c.Response().WriteHeader(status)
-	return w.tmpl.ExecuteTemplate(c.Response(), name, data)
+	_, err := c.Response().Write(buf.Bytes())
+	return err
 }
 
 func (w *Web) renderError(c *echo.Context, status int, msg string) error {

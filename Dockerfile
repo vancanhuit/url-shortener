@@ -58,6 +58,7 @@ COPY . .
 # embed directive finds styles.css and htmx.min.js.
 COPY --from=web-builder /src/web/static/styles.css   ./web/static/styles.css
 COPY --from=web-builder /src/web/static/htmx.min.js  ./web/static/htmx.min.js
+COPY --from=web-builder /src/web/static/copy.js      ./web/static/copy.js
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

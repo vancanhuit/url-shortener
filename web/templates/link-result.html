@@ -5,11 +5,11 @@
     <input id="short-url" readonly value="{{.Link.ShortURL}}"
       class="flex-1 rounded-md border border-emerald-200 bg-white px-3 py-2
              font-mono text-indigo-700 select-all">
-    <button type="button" id="copy-btn"
+    <button type="button"
+      data-copy-target="short-url"
+      data-copy-label="Copy"
       class="rounded-md bg-emerald-600 px-3 py-2 text-white font-medium
-             hover:bg-emerald-500 transition-colors"
-      onclick="navigator.clipboard.writeText(document.getElementById('short-url').value);
-               this.textContent='Copied'; setTimeout(()=>this.textContent='Copy',1500)">
+             hover:bg-emerald-500 transition-colors">
       Copy
     </button>
   </div>

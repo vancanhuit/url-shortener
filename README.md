@@ -36,7 +36,7 @@ just test-integration                  # bring up test-profile infra, migrate, r
 just lint                              # run golangci-lint (auto-installs the pinned version)
 docker compose up --wait -d            # bring up the full local dev stack (db + redis + server on 5432/6379/8080)
 docker compose down -v                 # tear down the dev stack
-docker compose --profile test down -v  # tear down the test-profile stack (db-test + redis-test on 5433/6380)
+docker compose --profile=test down -v  # tear down the test-profile stack (db-test + redis-test on 5433/6380)
 ```
 
 The `compose.yaml` defines two stacks side by side: the **default** services

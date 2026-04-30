@@ -359,10 +359,13 @@ func (h *Links) makeResp(l store.Link) LinkResponse {
 }
 
 // normalizeURL returns a canonical form of target suitable for dedup
-// lookups: lowercase scheme + host, default port (:80/:443) stripped, and
-// a lone "/" path removed. Conservative on purpose -- query and fragment
-// are left intact since they're user-meaningful, and percent-encoding is
-// not touched (changing it could change semantics).
+// lookups: lowercase scheme + host, default port (:80/:443) stripped,
+// and a lone "/" path removed. Conservative on purpose -- query and
+// fragment are left intact since they're user-meaningful, and
+// percent-encoding case (%2A vs %2a, RFC-equivalent) is not touched
+// because changing it could change semantics for servers that mis-decode.
+// Trailing-dot hostnames (`example.com.`) are also left alone for the
+// same reason; in practice no real client emits them.
 //
 // Returns an error for inputs that would not pass validateTargetURL; in
 // practice callers should validate first, but this function is defensive.
@@ -373,7 +376,9 @@ func normalizeURL(target string) (string, error) {
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
 	host := strings.ToLower(u.Host)
-	// Strip default port.
+	// Strip the default port. The leading ":" anchors the suffix match,
+	// so something like ":8080" cannot accidentally be stripped: the
+	// last 3 bytes of "...:8080" are "080", not ":80".
 	switch {
 	case u.Scheme == "http" && strings.HasSuffix(host, ":80"):
 		host = strings.TrimSuffix(host, ":80")
