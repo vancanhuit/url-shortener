@@ -26,15 +26,31 @@ Prerequisites: Go 1.26+, Node.js 24+, Just, `golangci-lint` v2, Docker
 (for the local stack).
 
 ```sh
-just init             # install husky/commitlint dev dependencies
-just build            # build ./bin/url-shortener
-just test             # run unit tests with -race -v -cover
-just test-integration # bring up infra, migrate, run -tags=integration tests
-just lint             # run golangci-lint (auto-installs the pinned version)
-just up               # bring up infra (db + redis) for native iteration
-just dev              # bring up the full Docker stack (db + redis + server)
-just down             # tear it down (also removes volumes)
+just init                              # install husky/commitlint dev dependencies
+just web-install                       # install npm deps for the tailwind + htmx toolchain
+just web-build                         # compile tailwind CSS and vendor htmx into web/static
+just web-watch                         # tailwind in watch mode for UI iteration
+just build                             # build ./bin/url-shortener (depends on web-build)
+just test                              # run unit tests with -race -v -cover
+just test-integration                  # bring up test-profile infra, migrate, run -tags=integration tests
+just lint                              # run golangci-lint (auto-installs the pinned version)
+docker compose up --wait -d            # bring up the full local dev stack (db + redis + server on 5432/6379/8080)
+docker compose down -v                 # tear down the dev stack
+docker compose --profile test down -v  # tear down the test-profile stack (db-test + redis-test on 5433/6380)
 ```
+
+The `compose.yaml` defines two stacks side by side: the **default** services
+(`db`, `redis`, `server`) for local dev on standard ports, and a **`test`
+profile** (`db-test`, `redis-test`) on alternate ports (5433, 6380) with
+their own volumes. Running the integration suite while a dev stack is up
+is therefore safe; the two never collide.
+
+The HTML UI is embedded in the binary via `//go:embed`, so the compiled
+assets in `web/static/` must exist at `go build` time. They're treated as
+build artifacts (gitignored): `just build` always runs `just web-build`
+first so a fresh checkout works without ceremony, and the multi-stage
+`Dockerfile` has a dedicated `node` stage that produces them before the
+Go builder runs.
 
 ## Usage
 
@@ -81,7 +97,8 @@ Content-Type: application/json
 {"target_url": "https://example.com/...", "code": "optional"}
 ```
 
-Response `201 Created`:
+Response `201 Created` for a freshly minted code, `200 OK` when an existing
+row was reused (see Deduplication below):
 
 ```json
 {
@@ -102,6 +119,40 @@ Validation: `target_url` must be `http`/`https`, have a host, and be at most
 2048 characters. User-supplied codes must match `[0-9A-Za-z]{4,64}`. Status
 codes: `400` for malformed JSON, `409` for a duplicate user-supplied code,
 `422` for validation failures, `404` for unknown codes.
+
+### Deduplication
+
+Auto-generated codes are idempotent on the (normalized) target URL: a
+second `POST` of the same destination returns the existing row with
+`200 OK` instead of minting a new code. URLs are normalized before lookup
+and storage:
+
+- scheme and host are lowercased
+- the default port is stripped (`:80` for `http`, `:443` for `https`)
+- a bare `/` path is removed
+- everything else (path case, query string, fragment, percent-encoding)
+  is left untouched
+
+User-supplied codes always create a new row, even when the target is
+already present elsewhere -- two codes can legitimately point at the same
+destination. Dedup is best-effort under concurrent writes (no unique
+constraint on `target_url`).
+
+## Web UI
+
+The binary serves a small HTML UI at `/`:
+
+- A paste-URL form with optional custom code, posted via HTMX so success
+  and error states swap inline without a page reload.
+- A copy-to-clipboard button on the result panel.
+- A "Recent" list backed by Postgres, paginated cursor-style via the
+  `id DESC` order. The Load more button fetches `/recent?before=<id>`
+  and HTMX appends rows + replaces the cursor.
+
+Static assets are served under `/static/` from the embedded FS:
+
+- `/static/styles.css` &mdash; compiled Tailwind v4 bundle
+- `/static/htmx.min.js` &mdash; vendored HTMX 2
 
 ## Operational endpoints
 
@@ -125,19 +176,20 @@ upcoming phases of the rewrite plan.
 ```
 cmd/url-shortener/        binary entry point                            (present)
 internal/
-  cli/                    cobra commands (run, migrate, version, config) (present)
+  cli/                    cobra commands (run, migrate, version, config, healthcheck) (present)
   config/                 viper-based env config loader                   (present)
   buildinfo/              version / commit / date set via -ldflags        (present)
   server/                 echo setup, middleware, lifecycle              (present)
-  handlers/               http handlers (operational + json links api)   (present)
+  handlers/               operational, json links api, html web ui       (present)
   shortener/              short-code generation                          (present)
   store/                  pgx-based repository                           (present)
   cache/                  redis client wrapper                           (present)
   migrate/                goose runner over embedded SQL                 (present)
 migrations/               goose .sql migrations (//go:embed)             (present)
-web/templates/            html/template files
-web/static/               static assets (incl. compiled tailwind css)
-web/tailwind/             tailwind v4 toolchain (npm)
+web/                      html/template files + embed                   (present)
+web/templates/            html/template files                            (present)
+web/static/               compiled tailwind css + vendored htmx          (present)
+web/tailwind/             tailwind v4 toolchain (npm)                    (present)
 .dagger/                  dagger module (Go SDK)
 ```
 
