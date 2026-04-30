@@ -89,6 +89,27 @@ jobs:
       - name: just lint
         run: just lint
 
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      # Vuln scanning works on source, so a shallow checkout is fine
+      # (no `git describe` needed here).
+      - uses: actions/checkout@v6
+      # Reuse the project-wide toolchain composite. govulncheck doesn't
+      # need Node, but the composite always wires it up; the few extra
+      # seconds of setup-node aren't worth a special-case input.
+      - uses: ./.github/actions/setup-toolchain
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+      # `just vuln` self-installs govulncheck@latest into $GOPATH/bin
+      # and runs it with --build-tags=integration so the entire codebase
+      # (including //go:build integration tests) is analysed for
+      # reachable CVEs against the live https://pkg.go.dev/vuln database.
+      - name: just vuln
+        run: just vuln
+
   go-integration:
     name: go (integration)
     runs-on: ubuntu-latest
