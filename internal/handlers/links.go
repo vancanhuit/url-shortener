@@ -154,9 +154,35 @@ type LinkResponse struct {
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
-// ErrorResponse is the JSON shape returned for any non-2xx response.
+// ErrorResponse is the JSON shape returned for any non-2xx response from
+// the JSON API. The Error field is the human-readable description (safe
+// to surface in a UI); Code is a stable machine-readable identifier
+// suitable for client-side branching, metric labels, and i18n keys. The
+// pair is set together via errResp; callers should never construct an
+// ErrorResponse with one field and not the other.
 type ErrorResponse struct {
 	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+// API error codes. These strings are part of the public API contract:
+// once published, the values must not change (clients may switch on
+// them). Adding new codes is fine; renaming or removing an existing one
+// is a breaking change and warrants a major-version bump.
+const (
+	ErrCodeInvalidJSONBody = "invalid_json_body" // 400 on POST when the body is not parseable JSON.
+	ErrCodeValidation      = "validation_failed" // 422 when input fails our rules (bad URL, bad code, bad expiry).
+	ErrCodeCodeTaken       = "code_taken"        // 409 when a user-supplied short code is already in use.
+	ErrCodeNotFound        = "not_found"         // 404 when the requested code does not exist.
+	ErrCodeLinkExpired     = "link_expired"      // 410 when the link existed but has passed its expires_at.
+	ErrCodeInternal        = "internal_error"    // 500 for any other failure.
+)
+
+// errResp builds an ErrorResponse with both fields set. Centralised so
+// every call site is forced to provide a code, preventing the public
+// shape from drifting back into "human message only".
+func errResp(code, msg string) ErrorResponse {
+	return ErrorResponse{Error: msg, Code: code}
 }
 
 // --- service-level helpers (exposed for the web handler) -------------------
@@ -326,7 +352,7 @@ func (h *Links) Response(l store.Link) LinkResponse { return h.makeResp(l) }
 func (h *Links) Create(c *echo.Context) error {
 	var req createReq
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid json body"})
+		return c.JSON(http.StatusBadRequest, errResp(ErrCodeInvalidJSONBody, "invalid json body"))
 	}
 
 	link, created, err := h.Persist(c.Request().Context(), req.TargetURL, req.Code, req.ExpiresAt)
@@ -334,11 +360,11 @@ func (h *Links) Create(c *echo.Context) error {
 	case PersistErrNone:
 		// fall through to the success response below
 	case PersistErrValidation:
-		return c.JSON(status, ErrorResponse{Error: msg})
+		return c.JSON(status, errResp(ErrCodeValidation, msg))
 	case PersistErrCodeTaken:
-		return c.JSON(status, ErrorResponse{Error: "code already in use"})
+		return c.JSON(status, errResp(ErrCodeCodeTaken, "code already in use"))
 	case PersistErrInternal:
-		return c.JSON(status, ErrorResponse{Error: "internal error"})
+		return c.JSON(status, errResp(ErrCodeInternal, "internal error"))
 	}
 	status := http.StatusCreated
 	if !created {
@@ -374,18 +400,18 @@ func (h *Links) createWithRandomCode(ctx context.Context, target string, expires
 func (h *Links) Get(c *echo.Context) error {
 	code := c.Param("code")
 	if !shortener.ValidCode(code) {
-		return c.JSON(http.StatusNotFound, ErrorResponse{Error: "not found"})
+		return c.JSON(http.StatusNotFound, errResp(ErrCodeNotFound, "not found"))
 	}
 	link, err := h.store.GetLinkByCode(c.Request().Context(), nil, code)
 	if errors.Is(err, store.ErrNotFound) {
-		return c.JSON(http.StatusNotFound, ErrorResponse{Error: "not found"})
+		return c.JSON(http.StatusNotFound, errResp(ErrCodeNotFound, "not found"))
 	}
 	if err != nil {
 		h.logger.Error("links: get failed", "error", err, "code", code)
-		return c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal error"})
+		return c.JSON(http.StatusInternalServerError, errResp(ErrCodeInternal, "internal error"))
 	}
 	if link.IsExpired() {
-		return c.JSON(http.StatusGone, ErrorResponse{Error: "link has expired"})
+		return c.JSON(http.StatusGone, errResp(ErrCodeLinkExpired, "link has expired"))
 	}
 	return c.JSON(http.StatusOK, h.makeResp(link))
 }

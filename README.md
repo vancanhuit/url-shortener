@@ -148,6 +148,26 @@ expired code (returned by both `GET /api/v1/links/:code` and
 `GET /r/:code` -- distinct from `404` so clients can tell a once-valid
 code from one that never existed).
 
+Error responses carry a stable `code` field alongside the
+human-readable `error` so clients can branch on the failure without
+parsing the message:
+
+```json
+{ "error": "code already in use", "code": "code_taken" }
+```
+
+| HTTP | `code`              | When                                                      |
+| ---- | ------------------- | --------------------------------------------------------- |
+| 400  | `invalid_json_body` | Request body is not parseable JSON.                       |
+| 422  | `validation_failed` | Input failed a validation rule (URL, code, or expiry).    |
+| 409  | `code_taken`        | The user-supplied short code is already in use.           |
+| 404  | `not_found`         | The code does not exist (either malformed or unknown).    |
+| 410  | `link_expired`      | The link existed but its `expires_at` has passed.         |
+| 500  | `internal_error`    | Any other server-side failure; details are logged only.   |
+
+The string values are part of the public API contract and will not
+change once published; new codes may be added.
+
 ### Deduplication
 
 Auto-generated codes are idempotent on the (normalized) target URL: a
