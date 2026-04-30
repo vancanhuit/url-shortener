@@ -85,4 +85,13 @@ EXPOSE 8080
 
 USER nonroot:nonroot
 
+# Probe the binary's own /healthz via the `healthcheck` subcommand.
+# Distroless ships neither curl nor wget, so the binary itself is the
+# probe. Mirrors the compose.yaml healthcheck so `docker run` users get
+# the same liveness signal without composing a stack. Kubernetes and
+# other orchestrators that drive their own probes can override this
+# with their own livenessProbe.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/url-shortener", "healthcheck"]
+
 ENTRYPOINT ["/usr/local/bin/url-shortener"]
