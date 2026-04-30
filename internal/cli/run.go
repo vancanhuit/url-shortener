@@ -43,7 +43,13 @@ func newRunCmd() *cobra.Command {
 						return err
 					}
 				}
-				st, err = store.New(cmd.Context(), cfg.DatabaseURL)
+				st, err = store.NewWithPool(cmd.Context(), cfg.DatabaseURL, store.PoolConfig{
+					MaxConns:          cfg.DBMaxConns,
+					MinConns:          cfg.DBMinConns,
+					MaxConnLifetime:   cfg.DBMaxConnLifetime,
+					MaxConnIdleTime:   cfg.DBMaxConnIdleTime,
+					HealthCheckPeriod: cfg.DBHealthCheckPeriod,
+				})
 				if err != nil {
 					return err
 				}

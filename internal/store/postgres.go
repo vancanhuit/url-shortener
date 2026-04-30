@@ -61,13 +61,56 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+// PoolConfig collects the pgxpool tunables the service exposes. A zero
+// field means "leave the pgxpool default in place" so callers (and
+// tests) can opt in to the knobs they care about without restating the
+// rest. The defaults pgx ships with are tuned for short-lived clients;
+// long-running services typically want a larger MaxConns and a shorter
+// MaxConnLifetime to absorb DB-side connection churn (failover, PgBouncer
+// rotations, periodic restarts).
+type PoolConfig struct {
+	// MaxConns is the upper bound on simultaneous connections.
+	// pgx default: max(4, runtime.NumCPU()).
+	MaxConns int32
+	// MinConns is how many idle connections the pool keeps warm.
+	// pgx default: 0.
+	MinConns int32
+	// MaxConnLifetime is the hard cap on a single connection's age,
+	// after which it is retired even if otherwise healthy. Useful to
+	// rotate through DB-side connection-state drift (prepared
+	// statements, search_path) and to ride out floating-IP failovers.
+	// pgx default: 1h.
+	MaxConnLifetime time.Duration
+	// MaxConnIdleTime is how long a connection may sit unused before
+	// being closed. pgx default: 30m.
+	MaxConnIdleTime time.Duration
+	// HealthCheckPeriod is how often pgx scans the pool for stale
+	// connections. pgx default: 1m.
+	HealthCheckPeriod time.Duration
+}
+
 // New opens a pgx pool against databaseURL and returns a Store that owns it.
 // Callers must call Close when done.
+//
+// New leaves the pool tunables at pgx's defaults; callers that need to
+// override them (typically the production CLI) should use NewWithPool.
 func New(ctx context.Context, databaseURL string) (*Store, error) {
+	return NewWithPool(ctx, databaseURL, PoolConfig{})
+}
+
+// NewWithPool is New plus the pool-tunable overrides described on
+// PoolConfig. Zero fields are left untouched so the per-knob defaults
+// remain whatever pgx considers sensible at the version we link.
+func NewWithPool(ctx context.Context, databaseURL string, pc PoolConfig) (*Store, error) {
 	if databaseURL == "" {
 		return nil, errors.New("store: database url is empty")
 	}
-	pool, err := pgxpool.New(ctx, databaseURL)
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("store: parse url: %w", err)
+	}
+	applyPoolConfig(cfg, pc)
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("store: open pool: %w", err)
 	}
@@ -76,6 +119,27 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, fmt.Errorf("store: ping: %w", err)
 	}
 	return &Store{pool: pool}, nil
+}
+
+// applyPoolConfig mutates cfg in place with any non-zero fields from pc.
+// Split out so tests can exercise the merge logic without standing up a
+// real Postgres.
+func applyPoolConfig(cfg *pgxpool.Config, pc PoolConfig) {
+	if pc.MaxConns > 0 {
+		cfg.MaxConns = pc.MaxConns
+	}
+	if pc.MinConns > 0 {
+		cfg.MinConns = pc.MinConns
+	}
+	if pc.MaxConnLifetime > 0 {
+		cfg.MaxConnLifetime = pc.MaxConnLifetime
+	}
+	if pc.MaxConnIdleTime > 0 {
+		cfg.MaxConnIdleTime = pc.MaxConnIdleTime
+	}
+	if pc.HealthCheckPeriod > 0 {
+		cfg.HealthCheckPeriod = pc.HealthCheckPeriod
+	}
 }
 
 // Close releases the underlying pgx pool.

@@ -84,6 +84,16 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | **Required.** Redis connection string. Redacted when printed.   |
 | `URL_SHORTENER_AUTO_MIGRATE`   | `false`                       | When `true`, `run` applies migrations before serving. Convenient for local dev / single-replica CI; production deployments should leave this off and run `migrate up` as a separate step. |
 | `URL_SHORTENER_CODE_LENGTH`    | `7`                           | Length of auto-generated short codes (base62). Must be in [4, 64]. |
+| `URL_SHORTENER_DB_MAX_CONNS`           | _(pgx default: max(4, NumCPU))_ | Upper bound on simultaneous Postgres connections. Set above the default to absorb burst load without queueing requests on the pool. |
+| `URL_SHORTENER_DB_MIN_CONNS`           | _(pgx default: 0)_              | Idle connections kept warm. Useful to amortize TLS/handshake cost on bursty workloads. |
+| `URL_SHORTENER_DB_MAX_CONN_LIFETIME`   | _(pgx default: 1h)_             | Hard cap on a connection's age. Forces rotation through floating-IP failovers and clears DB-side connection-state drift. Accepts Go duration syntax (e.g. `30m`, `2h`). |
+| `URL_SHORTENER_DB_MAX_CONN_IDLE_TIME`  | _(pgx default: 30m)_            | How long a connection may sit unused before being closed. |
+| `URL_SHORTENER_DB_HEALTH_CHECK_PERIOD` | _(pgx default: 1m)_             | How often pgx scans the pool for stale connections. |
+
+Pool tunables are zero by default, in which case pgx's own defaults apply.
+Production deployments behind a fronting proxy (PgBouncer, RDS Proxy)
+typically want `DB_MAX_CONNS` raised to match the pool's per-replica
+backend cap and `DB_MAX_CONN_LIFETIME` lowered to a few minutes.
 
 Run `url-shortener config` to print the fully resolved configuration with
 passwords replaced by `REDACTED`.
