@@ -111,6 +111,82 @@ func TestGetLinkByCode_MissingReturnsErrNotFound(t *testing.T) {
 	}
 }
 
+// TestGetLinkByTargetURL_ReturnsOldestMatchOrNotFound exercises the dedup
+// lookup: when several rows share the same target_url, the oldest (lowest
+// id) row is returned; when none match, ErrNotFound surfaces.
+func TestGetLinkByTargetURL_ReturnsOldestMatchOrNotFound(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+
+	suffix := uniqueCode(t)
+	target := "https://example.com/get-by-target/" + suffix
+
+	first, err := s.CreateLink(ctx, nil, "p"+suffix, target)
+	if err != nil {
+		t.Fatalf("CreateLink first: %v", err)
+	}
+	if _, err := s.CreateLink(ctx, nil, "q"+suffix, target); err != nil {
+		t.Fatalf("CreateLink second: %v", err)
+	}
+
+	got, err := s.GetLinkByTargetURL(ctx, nil, target)
+	if err != nil {
+		t.Fatalf("GetLinkByTargetURL: %v", err)
+	}
+	if got.ID != first.ID {
+		t.Errorf("got id %d, want oldest %d", got.ID, first.ID)
+	}
+
+	if _, err := s.GetLinkByTargetURL(ctx, nil, "https://nope.example/"+suffix); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("missing target: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestListLinks_OrdersAndPaginates verifies the cursor-based pagination
+// shape: rows come back in id-DESC order, beforeID excludes ids >= it, and
+// limit caps the result.
+func TestListLinks_OrdersAndPaginates(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+
+	// Insert three rows; capture the ids in insertion order so we can drive
+	// cursor pagination from a known reference point. Each test run uses
+	// fresh, unique codes so we don't conflict with other tests / re-runs.
+	suffix := uniqueCode(t)
+	codes := []string{"a" + suffix, "b" + suffix, "c" + suffix}
+	ids := make([]int64, len(codes))
+	for i, code := range codes {
+		l, err := s.CreateLink(ctx, nil, code, "https://example.com/list/"+code)
+		if err != nil {
+			t.Fatalf("CreateLink %q: %v", code, err)
+		}
+		ids[i] = l.ID
+	}
+
+	// First "page": ask for 2 newest. We expect the last two we inserted,
+	// in reverse insertion order.
+	page1, err := s.ListLinks(ctx, nil, 2, 0)
+	if err != nil {
+		t.Fatalf("ListLinks page 1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page 1 len = %d, want 2", len(page1))
+	}
+	if page1[0].ID != ids[2] || page1[1].ID != ids[1] {
+		t.Errorf("page 1 ids = [%d %d], want [%d %d]", page1[0].ID, page1[1].ID, ids[2], ids[1])
+	}
+
+	// Second "page": cursor right after the last row we returned -> only
+	// rows with id < ids[1] remain (i.e. ids[0]).
+	page2, err := s.ListLinks(ctx, nil, 2, ids[1])
+	if err != nil {
+		t.Fatalf("ListLinks page 2: %v", err)
+	}
+	if len(page2) == 0 || page2[0].ID != ids[0] {
+		t.Errorf("page 2 should start at ids[0]=%d; got %+v", ids[0], page2)
+	}
+}
+
 // TestTransaction verifies that store methods participate in a caller-managed
 // transaction when a pgx.Tx is passed as the DBTX argument: rolling back the
 // tx must drop the inserted row.

@@ -1,0 +1,38 @@
+{{define "content"}}
+<form id="shorten-form"
+      hx-post="/links"
+      hx-target="#result"
+      hx-swap="innerHTML"
+      class="space-y-3">
+  <label class="block">
+    <span class="text-sm font-medium text-slate-700">URL</span>
+    <input name="target_url" type="url" required autofocus
+      placeholder="https://example.com/some/long/path"
+      class="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2
+             focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+  </label>
+  <details class="text-sm">
+    <summary class="cursor-pointer text-slate-600 hover:text-slate-800">Custom code (optional)</summary>
+    <input name="code" type="text" pattern="[A-Za-z0-9]{4,64}"
+      placeholder="mylink"
+      class="mt-2 block w-full rounded-md border border-slate-300 bg-white px-3 py-2
+             font-mono
+             focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+  </details>
+  <button type="submit"
+    class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-white font-medium
+           hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500
+           transition-colors">
+    Shorten
+  </button>
+</form>
+
+<div id="result" class="mt-6"></div>
+
+<section class="mt-12">
+  <h2 class="text-lg font-semibold text-slate-800 mb-3">Recent</h2>
+  <div id="recent">
+    {{template "recent-list" .}}
+  </div>
+</section>
+{{end}}

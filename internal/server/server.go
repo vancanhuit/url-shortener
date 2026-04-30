@@ -22,6 +22,7 @@ import (
 	"github.com/vancanhuit/url-shortener/internal/config"
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 	"github.com/vancanhuit/url-shortener/internal/store"
+	"github.com/vancanhuit/url-shortener/web"
 )
 
 // Conservative HTTP server timeouts. They protect the process from slow or
@@ -75,6 +76,8 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	// Links API + redirect: requires the full set of deps. Cache is
 	// non-optional -- the handler treats it as always-present (config
 	// validation guarantees URL_SHORTENER_REDIS_URL is set in production).
+	// The HTML web UI (form + recent list) is mounted alongside whenever
+	// the API is up; both reuse the same underlying *handlers.Links.
 	if deps.Store != nil && deps.Cache != nil && deps.Generator != nil {
 		links := handlers.NewLinks(handlers.LinksConfig{
 			Store:     deps.Store,
@@ -84,6 +87,19 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 			Logger:    logger,
 		})
 		links.Mount(e)
+
+		tmpl, err := web.ParseTemplates()
+		if err != nil {
+			// Templates ship inside the binary, so a parse failure means
+			// a programming error: fail fast at startup.
+			panic(fmt.Errorf("server: parse web templates: %w", err))
+		}
+		webH := handlers.NewWeb(handlers.WebConfig{
+			Links:     links,
+			Templates: tmpl,
+			Logger:    logger,
+		})
+		webH.Mount(e, web.Static())
 	}
 
 	httpSrv := &http.Server{
