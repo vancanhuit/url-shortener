@@ -41,12 +41,12 @@ jobs:
     # commits, and the squash-merge produces a fresh conventional commit.
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       - run: just init
       # The PR title becomes the squash-merge commit message on `main`, so
       # that's the message that has to be conventional. Per-commit hygiene
@@ -63,22 +63,22 @@ jobs:
       # fetch-depth: 0 so `just build` -> `git describe` can resolve the
       # version string against the most recent tag, producing meaningful
       # `1.2.3-N-gSHA` ldflags on PR/main builds instead of the bare SHA.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
       # `just build` depends on `web-build`, which `npm ci`s the Tailwind +
       # htmx toolchain in web/tailwind/ and emits the .gitignore'd assets
       # the Go binary embeds. Cache is keyed on the tailwind lockfile.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: web/tailwind/package-lock.json
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       - name: just build
         run: just build
       - name: just test
@@ -94,21 +94,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Same fetch-depth: 0 reasoning as the `go` job above.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
       # Same setup-node story as the `go` job: `just test-integration`
       # depends on `build`, which depends on `web-build` (npm ci).
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: web/tailwind/package-lock.json
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       # `just test-integration` brings up the `test`-profile infra
       # (db-test on 5433 + redis-test on 6380), builds the binary, applies
       # migrations against the test DB, and runs the build-tagged tests --
@@ -134,25 +134,25 @@ jobs:
     steps:
       # fetch-depth: 0 so the version baked into each binary reflects
       # the distance from the most recent tag (e.g. `1.2.3-5-gabcdef0`).
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: web/tailwind/package-lock.json
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
 
       - name: just release-binaries
         run: just release-binaries
 
       - name: Upload binaries artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: binaries-pr-${{ github.event.pull_request.number }}
           path: |
@@ -182,7 +182,7 @@ jobs:
       # fetch-depth: 0 so the version build-arg picked up below reflects
       # the distance from the most recent tag (e.g. `1.2.3-5-gabcdef0`),
       # not just the bare commit SHA.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -193,8 +193,8 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Resolved VERSION=$version"
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       # GHCR login only on main pushes. PRs (incl. forks) skip this and
       # would fail to push anyway -- the build below routes them to an
@@ -216,7 +216,7 @@ jobs:
       # behaves the way most users expect.
       - name: Derive image tags + labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
           tags: |
@@ -226,7 +226,7 @@ jobs:
 
       - name: Build and push (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -246,7 +246,7 @@ jobs:
       # security-scanning step that may land later.
       - name: Build OCI tarball (PRs)
         if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -262,7 +262,7 @@ jobs:
 
       - name: Upload OCI tarball
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: oci-image-pr-${{ github.event.pull_request.number }}
           path: ./url-shortener-oci.tar
