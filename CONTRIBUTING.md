@@ -91,8 +91,8 @@ git tag -a v1.2.3 -m "v1.2.3"
 git push origin v1.2.3
 ```
 
-Use `just release-binaries v1.2.3` to produce the same archives locally
-under `./dist/` (handy for smoke-testing before tagging).
+Use `just --set VERSION v1.2.3 release-binaries` to produce the same archives
+locally under `./dist/` (handy for smoke-testing before tagging).
 
 ## Code quality
 

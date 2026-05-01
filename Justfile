@@ -1,6 +1,11 @@
 # Justfile -- task runner for the url-shortener project.
 # Run `just` (or `just help`) to list recipes.
 
+# All non-shebang recipes run under bash with strict-mode flags. Shebang
+# recipes (`#!/usr/bin/env bash`) bring their own interpreter and re-set
+# `pipefail` themselves; this only affects the simple one-liner recipes.
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
 # Resolve the version string from git tags, matching the documented scheme:
 #   git describe --tags --always --dirty=-dev --match 'v[0-9]*'
 # The leading `v` is preserved so the binary's `version` subcommand prints
@@ -40,47 +45,64 @@ default: help
 help:
     @just --list --unsorted
 
+# --- setup --------------------------------------------------------------------
+
 # One-time bootstrap: install Node devDependencies (husky + commitlint).
 # Uses `npm ci` for deterministic installs when a lockfile is present so CI
 # and local environments stay in sync.
+[group("setup")]
 init:
     @if [ ! -f package.json ]; then \
         echo "package.json missing"; exit 1; \
     fi
     npm ci
 
+# --- dev ----------------------------------------------------------------------
+
 # Build the binary into ./bin/url-shortener. The web UI is embedded via
 # `//go:embed`, so this recipe always re-runs `just web-build` first to
 # pick up template / CSS-class changes. Tailwind + the htmx vendor copy
 # together take ~200ms when npm deps are already installed.
+[group("dev")]
 build: web-build
     mkdir -p bin
     CGO_ENABLED=0 go build -trimpath -ldflags='{{LDFLAGS}}' -o bin/url-shortener ./cmd/url-shortener
 
 # Install npm deps for the web tailwind toolchain (idempotent).
+[group("setup")]
+[working-directory("web/tailwind")]
 web-install:
-    cd web/tailwind && npm ci
+    npm ci
 
 # Compile Tailwind CSS and vendor htmx.min.js into web/static/. The Go
 # binary embeds these via `//go:embed` in web/web.go, so re-run this
 # after touching templates or CSS classes.
+[group("dev")]
+[working-directory("web/tailwind")]
 web-build: web-install
-    cd web/tailwind && npm run build
+    npm run build
 
 # Tailwind in watch mode for fast UI iteration. Requires `just up` (or
 # `just dev`) so the server is reloading the binary in another terminal.
+[group("dev")]
+[working-directory("web/tailwind")]
 web-watch: web-install
-    cd web/tailwind && npm run watch:css
+    npm run watch:css
 
 # Run the binary locally.
+[group("dev")]
 run *ARGS:
     go run ./cmd/url-shortener {{ARGS}}
 
 # Print the resolved version (useful for verifying the ldflags pipeline).
+[group("dev")]
 version:
     @go run ./cmd/url-shortener version 2>/dev/null || echo "Version (resolved): {{VERSION}}"
 
+# --- test ---------------------------------------------------------------------
+
 # Run all unit tests with verbose output and per-package coverage.
+[group("test")]
 test:
     go test -race -v -cover ./...
 
@@ -92,6 +114,7 @@ test:
 # URLs are hard-coded against the `test`-profile services in compose.yaml
 # (db-test on host port 5433, redis-test on 6380); update both files
 # together if those ports ever change.
+[group("test")]
 test-integration: build
     #!/usr/bin/env bash
     set -euo pipefail
@@ -102,8 +125,11 @@ test-integration: build
     ./bin/url-shortener migrate up --database-url "$URL_SHORTENER_TEST_DATABASE_URL"
     go test -race -v -cover -tags=integration ./...
 
+# --- lint ---------------------------------------------------------------------
+
 # Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into $GOPATH/bin.
 # Idempotent: a no-op when the right version is already present.
+[group("lint")]
 lint-install:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -125,12 +151,16 @@ lint-install:
 # (e.g. internal/store/*_integration_test.go) are linted alongside the rest.
 # `-v` makes diagnostics (active linters, build tags, exclusions, timings)
 # visible in CI logs without changing the issue output.
+[group("lint")]
 lint: lint-install web-build tidy
     "$(go env GOPATH)/bin/golangci-lint" run -v --build-tags=integration
 
 # Format code (gofumpt + goimports via golangci-lint formatters).
+[group("lint")]
 fmt: lint-install
     "$(go env GOPATH)/bin/golangci-lint" fmt
+
+# --- security -----------------------------------------------------------------
 
 # Run govulncheck against the source. govulncheck is the official Go
 # vulnerability scanner: it cross-references our deps against the Go
@@ -139,7 +169,8 @@ fmt: lint-install
 # entrypoints -- so a CVE in a function we never call won't break CI.
 # `--build-tags=integration` matches the lint recipe so files behind
 # the integration build tag are also analysed.
-vuln:
+[group("security")]
+govulncheck:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -160,6 +191,7 @@ vuln:
 # present. We pin to a specific release rather than tracking `latest`
 # because trivy is a security-critical binary; reproducible scans
 # require a reproducible scanner, and bumps should be intentional.
+[group("security")]
 trivy-install:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -184,7 +216,8 @@ trivy-install:
 # Severity gate: HIGH and CRITICAL fail the run; --ignore-unfixed
 # silences findings for which there is no upstream fix yet (we cannot
 # act on those, and they otherwise create perpetual noise).
-trivy-scan-image IMAGE: trivy-install
+[group("security")]
+trivy-scan IMAGE: trivy-install
     "$(go env GOPATH)/bin/trivy" image \
         --severity HIGH,CRITICAL \
         --ignore-unfixed \
@@ -193,22 +226,28 @@ trivy-scan-image IMAGE: trivy-install
         {{IMAGE}}
 
 # Build the local Docker image (`url-shortener:dev`) and scan it with
-# Trivy. Complements `just vuln`: govulncheck only sees Go code, while
-# Trivy inspects the entire runtime image -- the distroless base, the
-# embedded binary, and any OS-level CPEs the registry knows about.
+# Trivy. Complements `just govulncheck`: govulncheck only sees Go code,
+# while Trivy inspects the entire runtime image -- the distroless base,
+# the embedded binary, and any OS-level CPEs the registry knows about.
+[group("security")]
 trivy-image: docker-build
-    just trivy-scan-image url-shortener:dev
+    just trivy-scan url-shortener:dev
 
 # Tidy go.mod / go.sum.
+[group("lint")]
 tidy:
     go mod tidy
 
+# --- release ------------------------------------------------------------------
+
 # Lint just the most recent commit message.
+[group("release")]
 commitlint-last:
     npx --no -- commitlint --from=HEAD~1 --to=HEAD
 
 # Lint a single commit-message string (used by the CI PR-title check).
 # Usage: just commitlint-msg "feat: add things"
+[group("release")]
 commitlint-msg MSG:
     @echo {{quote(MSG)}} | npx --no -- commitlint
 
@@ -220,6 +259,7 @@ commitlint-msg MSG:
 # Usage:
 #   just changelog v0.1.0            # since v0.1.0, up to HEAD
 #   just changelog v0.1.0 v0.2.0     # between two tags
+[group("release")]
 changelog FROM TO="HEAD":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -260,9 +300,10 @@ changelog FROM TO="HEAD":
     section "Docs"        "${docs_[@]+"${docs_[@]}"}"
     section "Other"       "${others[@]+"${others[@]}"}"
 
-# --- Docker / compose ---------------------------------------------------------
+# --- docker -------------------------------------------------------------------
 
 # Build the Docker image locally for the host's architecture only.
+[group("docker")]
 docker-build:
     docker build \
         --build-arg VERSION={{VERSION}} \
@@ -290,21 +331,28 @@ docker-build:
 # binaries embed the same Tailwind / htmx assets.
 #
 # Usage:
-#   just release-binaries           # uses {{VERSION}}
-#   just release-binaries v1.2.3    # explicit version override
-release-binaries V=VERSION: web-build
+#   just release-binaries                          # uses VERSION from git describe
+#   just --set VERSION v1.2.3 release-binaries     # explicit override
+#
+# `--set VERSION ...` overrides the global at the top of this Justfile,
+# so LDFLAGS (derived from VERSION) and the archive stem both pick up
+# the override automatically -- no recipe-level parameter needed.
+[group("release")]
+release-binaries: web-build
     #!/usr/bin/env bash
     set -euo pipefail
 
-    version="{{V}}"
     out=dist
     rm -rf "$out"
     mkdir -p "$out"
 
-    ldflags="-s -w \
-        -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=${version} \
-        -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit={{COMMIT}} \
-        -X github.com/vancanhuit/url-shortener/internal/buildinfo.date={{DATE}}"
+    # Pull justfile values into locals once via `quote()` so any
+    # special character in the resolved git-describe value is
+    # shell-escaped exactly once -- the rest of the recipe then uses
+    # ordinary bash expansion ("$version" / "$ldflags") without
+    # worrying about further quoting.
+    version={{quote(VERSION)}}
+    ldflags={{quote(LDFLAGS)}}
 
     for plat in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
         os="${plat%/*}"
@@ -340,7 +388,13 @@ release-binaries V=VERSION: web-build
 # `docker-build` skips them: BuildKit can only attach attestations to
 # images with the OCI v1.1 manifest layout, which the local docker daemon
 # (used by `--load`) does not accept.
-docker-buildx PUSH="false":
+#
+# `PUSH` is presence-based: pass any non-empty value to publish.
+# Examples:
+#   just docker-buildx              # local multi-arch build, no push
+#   just docker-buildx push         # publish to the registry
+[group("docker")]
+docker-buildx PUSH="":
     docker buildx build \
         --platform {{PLATFORMS}} \
         --build-arg VERSION={{VERSION}} \
@@ -349,12 +403,5 @@ docker-buildx PUSH="false":
         --sbom=true \
         --provenance=mode=max \
         -t url-shortener:{{VERSION}} \
-        {{ if PUSH == "true" { "--push" } else { "--output=type=image,push=false" } }} \
+        {{ if PUSH != "" { "--push" } else { "--output=type=image,push=false" } }} \
         .
-
-# --- CI -----------------------------------------------------------------------
-
-# Placeholder for the Dagger-driven CI; wired up in a later phase.
-ci:
-    @echo "CI is not yet implemented (added in the Dagger phase)"
-    @exit 1
