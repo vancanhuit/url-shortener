@@ -63,7 +63,7 @@ jobs:
         tag: [edge, latest]
     steps:
       - uses: actions/checkout@v6
-      # `just trivy-scan-image` self-installs trivy at the version
+      # `just trivy-scan` self-installs trivy at the version
       # pinned in the Justfile; the toolchain composite gives us Go
       # so `$(go env GOPATH)/bin` resolves correctly.
       - uses: ./.github/actions/setup-toolchain
@@ -101,7 +101,7 @@ jobs:
       # registry ref instead of the local-build tag. HIGH/CRITICAL
       # gate, --ignore-unfixed, exit-code=1 on findings -- a red
       # run is the alarm.
-      - name: just trivy-scan-image
+      - name: just trivy-scan
         if: steps.probe.outputs.exists == 'true'
         run: |
-          just trivy-scan-image '${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.tag }}'
+          just trivy-scan '${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.tag }}'

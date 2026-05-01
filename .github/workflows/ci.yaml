@@ -103,12 +103,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           node-version: ${{ env.NODE_VERSION }}
-      # `just vuln` self-installs govulncheck@latest into $GOPATH/bin
+      # `just govulncheck` self-installs govulncheck@latest into $GOPATH/bin
       # and runs it with --build-tags=integration so the entire codebase
       # (including //go:build integration tests) is analysed for
       # reachable CVEs against the live https://pkg.go.dev/vuln database.
-      - name: just vuln
-        run: just vuln
+      - name: just govulncheck
+        run: just govulncheck
 
   trivy:
     name: trivy (image scan)
