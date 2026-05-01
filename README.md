@@ -22,8 +22,50 @@ A small URL shortener service written in Go.
 
 ## Getting started
 
-Prerequisites: Go 1.26+, Node.js 24+, Just, `golangci-lint` v2, Docker
-(for the local stack).
+### Development environment
+
+The toolchain assumes a **Unix-like host** &mdash; Linux, macOS, or
+**WSL2** on Windows. The `Justfile` recipes use bash with
+`set -euo pipefail`, the npm scripts shell out to `mkdir`/`cp`,
+and the integration suite drives a local Docker daemon. Native
+Windows (cmd / PowerShell) is **not** supported; if you're on
+Windows, develop inside WSL2.
+
+Prerequisites:
+
+- **Go 1.26+** &mdash; the language. The pinned toolchain version
+  lives in `go.mod` (`toolchain go1.26.x`); newer is fine, older
+  isn't.
+- **Node.js 24+** &mdash; for the Tailwind v4 + HTMX toolchain in
+  `web/tailwind/`. Required only when building the web assets
+  locally; the `Dockerfile` brings its own Node stage.
+- **[Just](https://github.com/casey/just)** &mdash; the task runner;
+  every workflow in this README routes through it.
+- **`golangci-lint` v2** &mdash; auto-installed by `just lint` at
+  the version pinned in the `Justfile`, so a manual install is
+  optional.
+- **Docker** with the **Compose v2 plugin** and **Buildx** &mdash;
+  Compose drives the local Postgres/Redis stack and the
+  integration suite; Buildx produces the multi-arch images and
+  attaches the SBOM + provenance attestations.
+- **`git`** with at least the project's full tag history (`git
+  fetch --tags`); the build embeds a `git describe` version string
+  via `LDFLAGS`, and the changelog generator walks the tag graph.
+
+Optional but useful:
+
+- **`jq`** &mdash; for inspecting SBOMs and JSON API responses.
+- **`psql`** / **`redis-cli`** &mdash; for poking at the local
+  stack outside the test harness.
+
+The repository is the **single source of truth for tool versions**:
+`Justfile` pins `GOLANGCI_LINT_VERSION` and `TRIVY_VERSION`, the
+`Dockerfile` pins Go and Node `ARG`s, and CI overrides via env vars
+defined in `.github/workflows/ci.yaml`. There are no global
+installs of any of these tools required &mdash; running a recipe
+will install what it needs into `$(go env GOPATH)/bin` on demand.
+
+### Workflow cheatsheet
 
 ```sh
 just init                              # install husky/commitlint dev dependencies
