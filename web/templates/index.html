@@ -1,48 +1,70 @@
 {{define "content"}}
-<form id="shorten-form"
-      hx-post="/links"
-      hx-target="#result"
-      hx-swap="innerHTML"
-      class="space-y-3">
-  <label class="block">
-    <span class="text-sm font-medium text-slate-700">URL</span>
-    <input name="target_url" type="url" required autofocus
-      placeholder="https://example.com/some/long/path"
-      class="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2
-             focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-  </label>
-  <details class="text-sm">
-    <summary class="cursor-pointer text-slate-600 hover:text-slate-800">Custom code (optional)</summary>
-    <input name="code" type="text" pattern="[A-Za-z0-9]{4,64}"
-      placeholder="mylink"
-      class="mt-2 block w-full rounded-md border border-slate-300 bg-white px-3 py-2
-             font-mono
-             focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-  </details>
-  <label class="block text-sm">
-    <span class="font-medium text-slate-700">Expires</span>
-    <select name="expires_in"
-      class="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2
-             focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-      <option value="">Never</option>
-      <option value="1h">1 hour</option>
-      <option value="1d">1 day</option>
-      <option value="7d">7 days</option>
-      <option value="30d">30 days</option>
-    </select>
-  </label>
-  <button type="submit"
-    class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-white font-medium
-           hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500
-           transition-colors">
-    Shorten
-  </button>
-</form>
+{{/*
+  Reusable Tailwind utility groups via Go template variables. Keeps
+  the input/select/button skins in one place so future tweaks (e.g.
+  swapping the focus ring colour) don't drift across fields.
+*/}}
+{{$inputClass := "mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/40 transition-colors"}}
+<div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-5 sm:p-6
+            dark:bg-slate-900 dark:ring-slate-800">
+  <form id="shorten-form"
+        hx-post="/links"
+        hx-target="#result"
+        hx-swap="innerHTML"
+        class="space-y-4">
+    <label class="block">
+      <span class="text-sm font-medium text-slate-700 dark:text-slate-300">URL</span>
+      <input name="target_url" type="url" required autofocus
+        placeholder="https://example.com/some/long/path"
+        class="{{$inputClass}}">
+    </label>
+    <details class="group text-sm">
+      <summary class="cursor-pointer select-none text-slate-600 hover:text-slate-800
+                      dark:text-slate-400 dark:hover:text-slate-200
+                      transition-colors flex items-center gap-1.5">
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"
+             class="h-3.5 w-3.5 transition-transform group-open:rotate-90">
+          <path fill-rule="evenodd"
+                d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.168 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
+                clip-rule="evenodd"/>
+        </svg>
+        Custom code (optional)
+      </summary>
+      <input name="code" type="text" pattern="[A-Za-z0-9]{4,64}"
+        placeholder="mylink"
+        class="{{$inputClass}} font-mono">
+    </details>
+    <label class="block text-sm">
+      <span class="font-medium text-slate-700 dark:text-slate-300">Expires</span>
+      <select name="expires_in" class="{{$inputClass}}">
+        <option value="">Never</option>
+        <option value="1h">1 hour</option>
+        <option value="1d">1 day</option>
+        <option value="7d">7 days</option>
+        <option value="30d">30 days</option>
+      </select>
+    </label>
+    <button type="submit"
+      class="inline-flex w-full sm:w-auto items-center justify-center
+             rounded-lg bg-indigo-600 px-4 py-2.5 text-white font-medium
+             shadow-sm
+             hover:bg-indigo-500
+             focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500
+             focus-visible:ring-offset-2 focus-visible:ring-offset-white
+             dark:focus-visible:ring-offset-slate-900
+             active:bg-indigo-700
+             transition-colors">
+      Shorten
+    </button>
+  </form>
+</div>
 
 <div id="result" class="mt-6"></div>
 
-<section class="mt-12">
-  <h2 class="text-lg font-semibold text-slate-800 mb-3">Recent</h2>
+<section class="mt-10 sm:mt-12">
+  <h2 class="text-base sm:text-lg font-semibold text-slate-800 dark:text-slate-200 mb-3">
+    Recent
+  </h2>
   <div id="recent">
     {{template "recent-list" .}}
   </div>

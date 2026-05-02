@@ -5,16 +5,26 @@
 </ul>
 {{template "recent-pagination" .}}
 {{else}}
-<p id="recent-empty" class="text-sm text-slate-500">No links yet.</p>
+<p id="recent-empty"
+   class="rounded-xl bg-white px-4 py-6 text-center text-sm text-slate-500 ring-1 ring-slate-200
+          dark:bg-slate-900 dark:text-slate-400 dark:ring-slate-800">
+  No links yet.
+</p>
 {{end}}
 {{end}}
 
 {{define "recent-items"}}
 {{range .}}
-<li class="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 ring-1 ring-slate-200">
+<li class="rounded-xl bg-white px-3 py-2.5 sm:px-4 ring-1 ring-slate-200
+           hover:ring-slate-300
+           dark:bg-slate-900 dark:ring-slate-800 dark:hover:ring-slate-700
+           transition-colors
+           flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
   <a href="{{.ShortURL}}" target="_blank" rel="noopener"
-     class="font-mono text-indigo-600 hover:underline shrink-0">{{.ShortURL}}</a>
-  <span class="truncate text-sm text-slate-500 flex-1">{{.TargetURL}}</span>
+     class="font-mono text-sm text-indigo-600 hover:underline shrink-0
+            dark:text-indigo-400">{{.ShortURL}}</a>
+  <span class="truncate text-xs sm:text-sm text-slate-500 flex-1 min-w-0
+               dark:text-slate-400">{{.TargetURL}}</span>
   {{template "recent-badges" .}}
 </li>
 {{end}}
@@ -29,17 +39,18 @@
 */}}
 {{define "recent-badges"}}
 <span id="badges-{{.Code}}"
-      class="shrink-0 inline-flex items-center gap-2 text-xs"
+      class="shrink-0 inline-flex flex-wrap items-center gap-1.5 text-xs"
       hx-get="/links/{{.Code}}/badges"
       hx-trigger="every 5s"
       hx-swap="outerHTML">
-  <span class="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600"
+  <span class="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600
+               dark:bg-slate-800 dark:text-slate-300"
         title="{{.ClickCount}} click{{plural .ClickCount}}">
     {{.ClickCount}} click{{plural .ClickCount}}
   </span>
   {{with humanExpiry .ExpiresAt}}
   <span class="rounded-full px-2 py-0.5 font-medium
-               {{if eq . "expired"}}bg-rose-100 text-rose-700{{else}}bg-amber-100 text-amber-700{{end}}">
+               {{if eq . "expired"}}bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300{{else}}bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300{{end}}">
     {{.}}
   </span>
   {{end}}
@@ -47,13 +58,16 @@
 {{end}}
 
 {{define "recent-pagination"}}
-<div id="recent-pagination" class="mt-3 text-center">
+<div id="recent-pagination" class="mt-4 text-center">
   {{if .NextCursor}}
   <button id="load-more"
     hx-get="/recent?before={{.NextCursor}}"
     hx-target="#recent-items"
     hx-swap="beforeend"
-    class="text-sm text-indigo-600 hover:text-indigo-800 hover:underline">
+    class="text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:underline
+           dark:text-indigo-400 dark:hover:text-indigo-300
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500
+           rounded transition-colors">
     Load more
   </button>
   {{end}}

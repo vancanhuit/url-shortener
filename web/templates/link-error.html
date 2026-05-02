@@ -1,5 +1,13 @@
 {{define "link-error"}}
-<div class="rounded-md bg-rose-50 p-4 ring-1 ring-rose-200">
-  <p class="text-sm font-medium text-rose-700">{{.Error}}</p>
+<div class="rounded-xl bg-rose-50 p-4 ring-1 ring-rose-200
+            dark:bg-rose-500/10 dark:ring-rose-500/30
+            flex items-start gap-2">
+  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"
+       class="h-4 w-4 mt-0.5 shrink-0 text-rose-600 dark:text-rose-400">
+    <path fill-rule="evenodd"
+          d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm-1-5a1 1 0 1 1 2 0 1 1 0 0 1-2 0Zm.25-7.25a.75.75 0 0 1 1.5 0v4a.75.75 0 0 1-1.5 0v-4Z"
+          clip-rule="evenodd"/>
+  </svg>
+  <p class="text-sm font-medium text-rose-700 dark:text-rose-300">{{.Error}}</p>
 </div>
 {{end}}

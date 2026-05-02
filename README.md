@@ -259,6 +259,8 @@ Static assets are served under `/static/` from the embedded FS:
 
 - `/static/styles.css` &mdash; compiled Tailwind v4 bundle
 - `/static/htmx.min.js` &mdash; vendored HTMX 2
+- `/static/copy.js` &mdash; copy-to-clipboard helper
+- `/static/theme.js` &mdash; dark/light theme toggle
 
 ## Operational endpoints
 
