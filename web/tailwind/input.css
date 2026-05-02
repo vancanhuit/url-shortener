@@ -5,3 +5,58 @@
 @import "tailwindcss";
 
 @source "../templates/**/*.html";
+
+/* Class-based dark mode (the `dark` class is set on <html> by the
+ * inline boot script in layout.html). The `:where()` wrapper keeps
+ * specificity at zero so user-supplied selectors keep their natural
+ * weight. Default Tailwind v4 dark variant tracks the OS media
+ * query, which we override here to give users an explicit toggle. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Suppress Chrome / WebKit autofill's yellow-tinted background and
+ * default text colour. The browser doesn't let us override
+ * `background-color` directly on `:-webkit-autofill`, so we paint
+ * over it with a giant inset box-shadow (the standard workaround)
+ * and explicitly set `-webkit-text-fill-color` for the text.
+ *
+ * The 5000s transition is the well-known trick to delay Chrome's
+ * native colour transition long enough that ours wins on focus.
+ */
+@layer base {
+  /* `:-webkit-autofill` covers the post-fill state; the
+   * `:-internal-autofill-*` Chromium pseudos cover the *preview*
+   * state shown when Chrome highlights a saved suggestion before the
+   * user has actually selected it -- which is what produces the
+   * grey-ish overlay we'd otherwise still see on first paint.
+   * `!important` is unfortunately necessary: the user-agent
+   * stylesheet attaches `background-color` to the autofill state
+   * with high specificity, and without `!important` our box-shadow
+   * fill loses to it intermittently. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-internal-autofill-selected,
+  input:-internal-autofill-previewed,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: var(--color-slate-900) !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--color-white) inset !important;
+    background-color: var(--color-white) !important;
+    background-image: none !important;
+    caret-color: var(--color-slate-900);
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  :where(.dark) input:-webkit-autofill,
+  :where(.dark) input:-webkit-autofill:hover,
+  :where(.dark) input:-webkit-autofill:focus,
+  :where(.dark) input:-internal-autofill-selected,
+  :where(.dark) input:-internal-autofill-previewed,
+  :where(.dark) textarea:-webkit-autofill,
+  :where(.dark) select:-webkit-autofill {
+    -webkit-text-fill-color: var(--color-slate-100) !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--color-slate-900) inset !important;
+    background-color: var(--color-slate-900) !important;
+    caret-color: var(--color-slate-100);
+  }
+}

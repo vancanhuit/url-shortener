@@ -8,7 +8,8 @@
     "watch:css": "tailwindcss -i ./input.css -o ../static/styles.css --watch",
     "vendor:htmx": "cp node_modules/htmx.org/dist/htmx.min.js ../static/htmx.min.js",
     "vendor:copy": "cp copy.js ../static/copy.js",
-    "build": "npm run ensure:dir && npm run build:css && npm run vendor:htmx && npm run vendor:copy"
+    "vendor:theme": "cp theme.js ../static/theme.js",
+    "build": "npm run ensure:dir && npm run build:css && npm run vendor:htmx && npm run vendor:copy && npm run vendor:theme"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.6",

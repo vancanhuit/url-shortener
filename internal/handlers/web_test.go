@@ -452,7 +452,7 @@ func TestWeb_StaticAssetsServed(t *testing.T) {
 	t.Parallel()
 	e, _ := newWebSetup(t)
 
-	for _, p := range []string{"/static/styles.css", "/static/htmx.min.js", "/static/copy.js"} {
+	for _, p := range []string{"/static/styles.css", "/static/htmx.min.js", "/static/copy.js", "/static/theme.js"} {
 		req := httptest.NewRequest(http.MethodGet, p, nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)

@@ -32,6 +32,7 @@ node_modules/
 /web/static/styles.css
 /web/static/htmx.min.js
 /web/static/copy.js
+/web/static/theme.js
 
 # Release artifacts produced by `just release-binaries`.
 /dist/
