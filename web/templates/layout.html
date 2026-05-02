@@ -3,19 +3,129 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Self-hosted URL shortener. Paste a long URL, get a short one back.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
   <title>{{block "title" .}}URL Shortener{{end}}</title>
+  {{/*
+    Theme boot: applies the saved theme (or system preference if none)
+    BEFORE the stylesheet is parsed so the page never paints with the
+    wrong colours. Must stay inline + synchronous; the toggle UI is
+    wired up later by /static/theme.js (deferred).
+  */}}
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("theme");
+        var dark = t === "dark"
+          || (t !== "light"
+              && window.matchMedia
+              && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+      } catch (_) {
+        // localStorage may throw in private mode -- fall back to light.
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/copy.js" defer></script>
+  <script src="/static/theme.js" defer></script>
 </head>
-<body class="min-h-full bg-slate-50 text-slate-900 antialiased">
-  <div class="mx-auto max-w-2xl px-4 py-12">
-    <header class="mb-8">
-      <h1 class="text-3xl font-bold tracking-tight">URL Shortener</h1>
-      <p class="text-slate-600 mt-1">Paste a long URL and get a short one back.</p>
+<body class="min-h-full flex flex-col bg-slate-50 text-slate-900 antialiased
+             dark:bg-slate-950 dark:text-slate-100
+             selection:bg-indigo-200 dark:selection:bg-indigo-500/40">
+  <div class="flex-1 w-full mx-auto max-w-2xl px-4 sm:px-6 py-8 sm:py-12">
+    <header class="mb-8 sm:mb-10 flex items-start gap-3">
+      <span aria-hidden="true"
+            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl
+                   bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm
+                   ring-1 ring-indigo-500/20 dark:ring-indigo-400/30">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+          <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5"/>
+          <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5"/>
+        </svg>
+      </span>
+      <div class="flex-1 min-w-0">
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">URL Shortener</h1>
+        <p class="text-sm sm:text-base text-slate-600 dark:text-slate-400 mt-0.5">
+          Paste a long URL and get a short one back.
+        </p>
+      </div>
+      {{/*
+        Theme toggle: an ARIA switch with a sliding knob. The button's
+        visual state is driven entirely by the `dark` class on <html>
+        (set by the inline boot script + theme.js); the
+        `data-theme-toggle` hook is what theme.js delegates click on.
+      */}}
+      <button type="button"
+              role="switch"
+              aria-checked="false"
+              aria-label="Switch to dark theme"
+              data-theme-toggle
+              class="group relative shrink-0 mt-1 inline-flex h-7 w-12 items-center rounded-full
+                     bg-slate-200 ring-1 ring-slate-300 transition-colors
+                     hover:bg-slate-300
+                     focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500
+                     focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50
+                     dark:bg-slate-800 dark:ring-slate-700 dark:hover:bg-slate-700
+                     dark:focus-visible:ring-offset-slate-950">
+        <span aria-hidden="true"
+              class="pointer-events-none absolute inset-0 flex items-center justify-between px-1.5
+                     text-amber-500 dark:text-indigo-300">
+          <svg viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+            <path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm5.657 2.343a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM18 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 18 10Zm-2.343 5.657a.75.75 0 0 1-1.06 0l-1.061-1.06a.75.75 0 1 1 1.06-1.061l1.061 1.06a.75.75 0 0 1 0 1.061ZM10 18a.75.75 0 0 1-.75-.75v-1.5a.75.75 0 0 1 1.5 0v1.5A.75.75 0 0 1 10 18Zm-5.657-2.343a.75.75 0 0 1 0-1.06l1.06-1.061a.75.75 0 1 1 1.061 1.06l-1.06 1.061a.75.75 0 0 1-1.061 0ZM2 10a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm2.343-5.657a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061L4.343 5.404a.75.75 0 0 1 0-1.061ZM10 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/>
+          </svg>
+          <svg viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+            <path fill-rule="evenodd"
+                  d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z"
+                  clip-rule="evenodd"/>
+          </svg>
+        </span>
+        <span aria-hidden="true"
+              class="relative z-10 inline-block h-5 w-5 translate-x-1 rounded-full bg-white shadow
+                     ring-1 ring-slate-300 transition-transform
+                     dark:translate-x-6 dark:bg-slate-200 dark:ring-slate-400"></span>
+      </button>
     </header>
     <main>{{template "content" .}}</main>
   </div>
+  <footer class="border-t border-slate-200 dark:border-slate-800
+                 bg-white/50 dark:bg-slate-900/50 backdrop-blur">
+    <div class="mx-auto max-w-2xl px-4 sm:px-6 py-5 text-xs sm:text-sm
+                text-slate-500 dark:text-slate-400
+                flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      <p>Built with</p>
+      <ul class="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <li>
+          <a href="https://go.dev" target="_blank" rel="noopener noreferrer"
+             class="font-medium text-slate-700 hover:text-indigo-600
+                    dark:text-slate-300 dark:hover:text-indigo-400
+                    underline-offset-4 hover:underline transition-colors">
+            Go
+          </a>
+        </li>
+        <li>
+          <a href="https://htmx.org" target="_blank" rel="noopener noreferrer"
+             class="font-medium text-slate-700 hover:text-indigo-600
+                    dark:text-slate-300 dark:hover:text-indigo-400
+                    underline-offset-4 hover:underline transition-colors">
+            htmx
+          </a>
+        </li>
+        <li>
+          <a href="https://tailwindcss.com" target="_blank" rel="noopener noreferrer"
+             class="font-medium text-slate-700 hover:text-indigo-600
+                    dark:text-slate-300 dark:hover:text-indigo-400
+                    underline-offset-4 hover:underline transition-colors">
+            Tailwind CSS
+          </a>
+        </li>
+      </ul>
+    </div>
+  </footer>
 </body>
 </html>
 {{end}}
