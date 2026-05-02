@@ -1,0 +1,99 @@
+name: codeql
+
+# CodeQL static analysis. Catches a different class of bugs than
+# `golangci-lint` + `govulncheck` -- specifically taint-tracking and
+# injection sinks (path traversal, SSRF, SQL via fmt.Sprintf, unsafe
+# template usage, etc.) that pattern-based linters miss.
+#
+# Findings appear in the repo's Security -> Code scanning tab.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Re-scan weekly so the database catches up with new query
+    # versions GitHub publishes between PRs. Monday 03:17 UTC -- a
+    # quiet slot, offset off-the-hour to avoid the schedule-storm
+    # that hits other workflows pinned to :00.
+    - cron: "17 3 * * 1"
+
+# Default to read-only; the analyze job opts into security-events
+# write so the SARIF upload can post results to the Security tab.
+permissions:
+  contents: read
+
+# Stack PR runs the same way ci.yaml does so a rapid push series
+# only spends one runner-pair on analysis.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Toolchain versions kept in lockstep with ci.yaml. Bump there
+  # first; this workflow re-asserts the literals so a CodeQL run
+  # cannot silently fall behind production CI on a Go bump.
+  GO_VERSION: 1.26.2
+  NODE_VERSION: 24.14.1
+  # See ci.yaml for the rationale on the Node-24 opt-in flag.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # SARIF upload to the Security tab.
+      security-events: write
+      # Read workflow run metadata (used by the action for cache keys
+      # and to attribute findings to the right run).
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only Go for now; the vendored client-side JS (theme.js,
+        # copy.js) is trivial and adding the javascript-typescript
+        # language would scan node_modules and slow the run for
+        # near-zero signal. Revisit if the client code grows.
+        language: [go]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Same Go + Node + just toolchain the rest of CI uses, so the
+      # CodeQL autobuild step compiles against the same versions
+      # production builds compile against. Sharing the composite
+      # also means there's exactly one place to fix when toolchain
+      # setup changes.
+      - uses: ./.github/actions/setup-toolchain
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@14c9a0cbe6373488c2a41f7e75c8dd142bb2aba8 # v3.35.3
+        with:
+          languages: ${{ matrix.language }}
+          # `security-extended` adds higher-precision queries beyond
+          # the default suite (SSRF, command injection, weak crypto).
+          # Skip `security-and-quality` -- the `quality` queries
+          # overlap heavily with golangci-lint and produce noise.
+          queries: security-extended
+
+      # Build the real Tailwind + htmx bundle into web/static/ so the
+      # `//go:embed static` directive in web/web.go finds the same
+      # assets it would in production. CodeQL only inspects Go AST
+      # + types, so the asset *contents* don't change analysis
+      # results -- but using the same build path as ci.yaml /
+      # release.yaml keeps the workflows mentally uniform and
+      # surfaces any embed-time regressions here too.
+      - name: just web-build
+        run: just web-build
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@14c9a0cbe6373488c2a41f7e75c8dd142bb2aba8 # v3.35.3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@14c9a0cbe6373488c2a41f7e75c8dd142bb2aba8 # v3.35.3
+        with:
+          category: "/language:${{ matrix.language }}"
