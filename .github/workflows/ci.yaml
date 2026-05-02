@@ -43,6 +43,15 @@ jobs:
     # commits, and the squash-merge produces a fresh conventional commit.
     if: github.event_name == 'pull_request'
     steps:
+      # Audit-only runtime monitoring (step-security/harden-runner):
+      # logs every outbound connection, file write, and process spawn
+      # this job makes. Does NOT block in audit mode -- after a week
+      # or two of data via the job summary, flip `egress-policy` to
+      # `block` with a curated `allowed-endpoints` list. Repeated as
+      # the first step of every job below; see this comment for why.
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # commitlint runs `just init`, which `npm ci`s the root toolchain
       # (husky + @commitlint/*). Point the npm cache at the root lockfile
@@ -67,6 +76,9 @@ jobs:
     name: go (build / test / lint)
     runs-on: ubuntu-latest
     steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       # fetch-depth: 0 so `just build` -> `git describe` can resolve the
       # version string against the most recent tag, producing meaningful
       # `v1.2.3-N-gSHA` ldflags on PR/main builds instead of the bare SHA.
@@ -95,6 +107,9 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       # Vuln scanning works on source, so a shallow checkout is fine
       # (no `git describe` needed here).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -120,6 +135,9 @@ jobs:
     # container and look for OS-level CVEs.
     needs: go
     steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # `just trivy-image` calls `just docker-build` (the Dockerfile's
       # own builder stages handle Go + npm) and `just trivy-scan`
@@ -144,6 +162,9 @@ jobs:
     name: go (integration)
     runs-on: ubuntu-latest
     steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       # Same fetch-depth: 0 reasoning as the `go` job above.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -183,6 +204,9 @@ jobs:
     needs: go
     runs-on: ubuntu-latest
     steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       # fetch-depth: 0 so the version baked into each binary reflects
       # the distance from the most recent tag (e.g. `v1.2.3-5-gabcdef0`).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -240,6 +264,9 @@ jobs:
       contents: read
       packages: write
     steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       # fetch-depth: 0 so the version build-arg picked up below reflects
       # the distance from the most recent tag (e.g. `v1.2.3-5-gabcdef0`),
       # not just the bare commit SHA.
