@@ -17,14 +17,16 @@ concurrency:
 # Pinned toolchain versions. Bump these in one place; jobs reference them
 # via ${{ env.GO_VERSION }} etc.
 #
-# GOLANGCI_LINT_VERSION must stay in sync with the constant of the same name
-# in the Justfile, since `just lint` self-installs golangci-lint at that
-# version. The workflow exports it so the Justfile can pick it up via the
-# GOLANGCI_LINT_VERSION shell variable when set.
+# GOLANGCI_LINT_VERSION and TRIVY_VERSION must stay in sync with the
+# constants of the same names in the Justfile, since `just lint` and
+# `just trivy-scan` self-install those binaries at the pinned versions.
+# The workflow exports them so the Justfile picks them up via the
+# matching shell variables when set.
 env:
   GO_VERSION: 1.26.2
   NODE_VERSION: 24.14.1
   GOLANGCI_LINT_VERSION: 2.11.4
+  TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io
   # Opt every JS-based action into the Node 24 runtime ahead of the
   # June 2026 deadline. Some third-party actions we depend on (e.g.

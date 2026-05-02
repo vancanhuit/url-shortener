@@ -47,6 +47,10 @@ concurrency:
 env:
   GO_VERSION: 1.26.2
   NODE_VERSION: 24.14.1
+  # Pin trivy from the workflow so a single bump on `main` rolls out
+  # to every scheduled run, and keep it in sync with TRIVY_VERSION
+  # in the Justfile (the recipe self-installs at this version).
+  TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
