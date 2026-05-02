@@ -160,6 +160,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # See ci.yaml's image job for the rationale behind this step.
+      # Diagnostic only; never fails the workflow.
+      - name: buildx cache stats
+        if: always()
+        continue-on-error: true
+        run: docker buildx du
+
   release:
     name: github release
     needs: image

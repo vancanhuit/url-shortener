@@ -401,3 +401,17 @@ jobs:
           path: ./url-shortener-oci.tar
           if-no-files-found: error
           retention-days: 7
+
+      # Diagnostic: surface the buildx cache layout in the job log so
+      # cache hit-rate is auditable without scraping per-step output.
+      # `build-push-action` already writes a per-stage hit/miss table
+      # to $GITHUB_STEP_SUMMARY (its `summary: true` default); this
+      # step adds a complementary view of which layers are actually
+      # resident in the GHA cache after the build. `if: always()` so
+      # it runs after either the main-push or PR-tarball branch above;
+      # `continue-on-error` keeps a future buildx CLI change from
+      # failing the workflow over a diagnostic.
+      - name: buildx cache stats
+        if: always()
+        continue-on-error: true
+        run: docker buildx du
