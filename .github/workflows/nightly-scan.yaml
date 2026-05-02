@@ -64,6 +64,15 @@ jobs:
       matrix:
         tag: [edge, latest]
     steps:
+      # Audit-only runtime monitoring (step-security/harden-runner):
+      # logs every outbound connection, file write, and process spawn
+      # this job makes. Does NOT block in audit mode -- after a week
+      # or two of data via the job summary, flip `egress-policy` to
+      # `block` with a curated `allowed-endpoints` list. Repeated as
+      # the first step of every job below; see this comment for why.
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # `just trivy-scan` self-installs trivy at the version pinned
       # in the Justfile (TRIVY_VERSION) into $HOME/.local/bin via
