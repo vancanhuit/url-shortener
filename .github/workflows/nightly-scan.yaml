@@ -45,8 +45,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: 1.26.2
-  NODE_VERSION: 24.14.1
+  # Pin trivy from the workflow so a single bump on `main` rolls out
+  # to every scheduled run, and keep it in sync with TRIVY_VERSION
+  # in the Justfile (the recipe self-installs at this version).
+  TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -63,13 +65,12 @@ jobs:
         tag: [edge, latest]
     steps:
       - uses: actions/checkout@v6
-      # `just trivy-scan` self-installs trivy at the version
-      # pinned in the Justfile; the toolchain composite gives us Go
-      # so `$(go env GOPATH)/bin` resolves correctly.
-      - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
+      # `just trivy-scan` self-installs trivy at the version pinned
+      # in the Justfile (TRIVY_VERSION) into $HOME/.local/bin via
+      # BIN_DIR -- no Go/Node toolchain needed on the host. Trivy
+      # pulls the image directly from GHCR via OCI, so the runner's
+      # preinstalled Docker daemon is also unused here.
+      - uses: extractions/setup-just@v4
 
       # GHCR allows anonymous pulls for public packages, but logging
       # in costs nothing and keeps the workflow working if the

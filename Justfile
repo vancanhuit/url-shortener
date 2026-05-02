@@ -17,26 +17,33 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 # `v1.2.3-dev` -- a clearer "this is a developer build" signal than the
 # bare git terminology, while CI runs (always clean checkouts) keep
 # emitting the unsuffixed string.
-VERSION                := `git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev"`
-COMMIT                 := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
+VERSION := `git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev"`
+COMMIT := `git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown"`
 # Use the committer timestamp of HEAD (in UTC, RFC3339) so two builds
 # of the same commit report identical metadata. Falls back to the
 # current wall-clock time outside a git checkout (e.g. tarball builds).
-DATE                   := `TZ=UTC git show -s --format='%cd' --date='format-local:%Y-%m-%dT%H:%M:%SZ' HEAD 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ`
-PLATFORMS              := "linux/amd64,linux/arm64"
+DATE := `TZ=UTC git show -s --format='%cd' --date='format-local:%Y-%m-%dT%H:%M:%SZ' HEAD 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ`
+PLATFORMS := "linux/amd64,linux/arm64"
 # golangci-lint version. CI overrides this via the GOLANGCI_LINT_VERSION
 # env var defined in .github/workflows/ci.yaml so there is a single source of
 # truth per run; the literal here is the default for local development.
-GOLANGCI_LINT_VERSION  := env("GOLANGCI_LINT_VERSION", "2.11.4")
-# Trivy version. Installed via the official install.sh into $GOPATH/bin
+GOLANGCI_LINT_VERSION := env("GOLANGCI_LINT_VERSION", "2.11.4")
+# Trivy version. Installed via the official install.sh into BIN_DIR
 # rather than the aquasecurity/trivy-action GitHub Action -- the action
 # was compromised in the March-2026 supply-chain incident, so we stick
 # to the upstream binary at a pinned version we control.
-TRIVY_VERSION          := env("TRIVY_VERSION", "0.70.0")
+TRIVY_VERSION := env("TRIVY_VERSION", "0.70.0")
+# Install prefix for self-installed tooling (golangci-lint, govulncheck,
+# trivy). Defaults to the XDG-style `$HOME/.local/bin`, which is on PATH
+# on most modern distros (systemd's user profile, GitHub-hosted runners).
+# Override via the `BIN_DIR` env var when a different layout is needed.
+# Decoupling from `$(go env GOPATH)/bin` lets non-Go recipes (`trivy-*`,
+# `lint-install`) run on hosts that don't have a Go toolchain at all.
+BIN_DIR := env("BIN_DIR", env("HOME") + "/.local/bin")
 LDFLAGS := "-s -w" + \
     " -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=" + VERSION + \
-    " -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit="  + COMMIT  + \
-    " -X github.com/vancanhuit/url-shortener/internal/buildinfo.date="    + DATE
+    " -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit=" + COMMIT + \
+    " -X github.com/vancanhuit/url-shortener/internal/buildinfo.date=" + DATE
 
 # Default recipe -- list all available recipes.
 default: help
@@ -66,7 +73,7 @@ init:
 [group("dev")]
 build: web-build
     mkdir -p bin
-    CGO_ENABLED=0 go build -trimpath -ldflags='{{LDFLAGS}}' -o bin/url-shortener ./cmd/url-shortener
+    CGO_ENABLED=0 go build -trimpath -ldflags='{{ LDFLAGS }}' -o bin/url-shortener ./cmd/url-shortener
 
 # Install npm deps for the web tailwind toolchain (idempotent).
 [group("setup")]
@@ -92,12 +99,12 @@ web-watch: web-install
 # Run the binary locally.
 [group("dev")]
 run *ARGS:
-    go run ./cmd/url-shortener {{ARGS}}
+    go run ./cmd/url-shortener {{ ARGS }}
 
 # Print the resolved version (useful for verifying the ldflags pipeline).
 [group("dev")]
 version:
-    @go run ./cmd/url-shortener version 2>/dev/null || echo "Version (resolved): {{VERSION}}"
+    @go run ./cmd/url-shortener version 2>/dev/null || echo "Version (resolved): {{ VERSION }}"
 
 # --- test ---------------------------------------------------------------------
 
@@ -127,23 +134,24 @@ test-integration: build
 
 # --- lint ---------------------------------------------------------------------
 
-# Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into $GOPATH/bin.
+# Install golangci-lint v{{GOLANGCI_LINT_VERSION}} into {{BIN_DIR}}.
 # Idempotent: a no-op when the right version is already present.
 [group("lint")]
 lint-install:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    gobin="$(go env GOPATH)/bin"
-    bin="$gobin/golangci-lint"
-    want="{{GOLANGCI_LINT_VERSION}}"
+    bindir={{ quote(BIN_DIR) }}
+    bin="$bindir/golangci-lint"
+    want="{{ GOLANGCI_LINT_VERSION }}"
     have="$([ -x "$bin" ] && "$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo none)"
     if [ "$have" = "$want" ]; then
         echo "golangci-lint $want already installed at $bin"
     else
-        echo "installing golangci-lint $want into $gobin (have: $have)"
+        echo "installing golangci-lint $want into $bindir (have: $have)"
+        mkdir -p "$bindir"
         curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-            | sh -s -- -b "$gobin" "v$want"
+            | sh -s -- -b "$bindir" "v$want"
     fi
 
 # Run linters (auto-installs golangci-lint at the pinned version if missing).
@@ -153,12 +161,12 @@ lint-install:
 # visible in CI logs without changing the issue output.
 [group("lint")]
 lint: lint-install web-build tidy
-    "$(go env GOPATH)/bin/golangci-lint" run -v --build-tags=integration
+    {{ quote(BIN_DIR / "golangci-lint") }} run -v --build-tags=integration
 
 # Format code (gofumpt + goimports via golangci-lint formatters).
 [group("lint")]
 fmt: lint-install
-    "$(go env GOPATH)/bin/golangci-lint" fmt
+    {{ quote(BIN_DIR / "golangci-lint") }} fmt
 
 # --- security -----------------------------------------------------------------
 
@@ -177,16 +185,20 @@ govulncheck:
     # Always pull the latest CLI: govulncheck's value is the database
     # it queries, and the CLI itself rarely sees breaking changes worth
     # pinning. `go install ... @latest` is a fast no-op when the binary
-    # is already current.
-    gobin="$(go env GOPATH)/bin"
-    GOBIN="$gobin" go install golang.org/x/vuln/cmd/govulncheck@latest
+    # is already current. Lands in the default GOBIN ($GOBIN, else
+    # $(go env GOPATH)/bin) -- govulncheck is a Go tool and the host
+    # already needs Go to install it, so the conventional Go layout
+    # is the right home (unlike trivy / golangci-lint, which we route
+    # through BIN_DIR so they work on hosts without Go).
+    gobin="${GOBIN:-$(go env GOPATH)/bin}"
+    go install golang.org/x/vuln/cmd/govulncheck@latest
     # `-show=verbose` makes the per-run module + package inventory
     # visible in CI logs, so a failed run is easy to triage and a
     # passing one documents exactly what was scanned (12 root packages,
     # ~30 modules, and the stdlib at the time of writing).
     "$gobin/govulncheck" -show=verbose -tags=integration ./...
 
-# Install trivy v{{TRIVY_VERSION}} into $GOPATH/bin via the official
+# Install trivy v{{TRIVY_VERSION}} into {{BIN_DIR}} via the official
 # install.sh. Idempotent: a no-op when the right version is already
 # present. We pin to a specific release rather than tracking `latest`
 # because trivy is a security-critical binary; reproducible scans
@@ -196,16 +208,17 @@ trivy-install:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    gobin="$(go env GOPATH)/bin"
-    bin="$gobin/trivy"
-    want="{{TRIVY_VERSION}}"
+    bindir={{ quote(BIN_DIR) }}
+    bin="$bindir/trivy"
+    want="{{ TRIVY_VERSION }}"
     have="$([ -x "$bin" ] && "$bin" --version 2>/dev/null | awk '/^Version/ {print $2}' | head -1 || echo none)"
     if [ "$have" = "$want" ]; then
         echo "trivy $want already installed at $bin"
     else
-        echo "installing trivy $want into $gobin (have: $have)"
+        echo "installing trivy $want into $bindir (have: $have)"
+        mkdir -p "$bindir"
         curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b "$gobin" "v$want"
+            | sh -s -- -b "$bindir" "v$want"
     fi
 
 # Scan an arbitrary image reference (registry tag, digest, or local
@@ -218,12 +231,12 @@ trivy-install:
 # act on those, and they otherwise create perpetual noise).
 [group("security")]
 trivy-scan IMAGE: trivy-install
-    "$(go env GOPATH)/bin/trivy" image \
+    {{ quote(BIN_DIR / "trivy") }} image \
         --severity HIGH,CRITICAL \
         --ignore-unfixed \
         --exit-code 1 \
         --no-progress \
-        {{IMAGE}}
+        {{ IMAGE }}
 
 # Build the local Docker image (`url-shortener:dev`) and scan it with
 # Trivy. Complements `just govulncheck`: govulncheck only sees Go code,
@@ -249,7 +262,7 @@ commitlint-last:
 # Usage: just commitlint-msg "feat: add things"
 [group("release")]
 commitlint-msg MSG:
-    @echo {{quote(MSG)}} | npx --no -- commitlint
+    @echo {{ quote(MSG) }} | npx --no -- commitlint
 
 # Generate a release-notes markdown body for commits in (FROM, TO], grouped
 # by conventional-commit type. The release workflow pipes this into the GH
@@ -283,7 +296,7 @@ changelog FROM TO="HEAD":
             "docs:"*|"docs("*)         docs_+=("$line") ;;
             "build:"*|"build("*|"chore:"*|"chore("*|"ci:"*|"ci("*|"style:"*|"style("*|"test:"*|"test("*) others+=("$line") ;;
         esac
-    done < <(git log {{FROM}}..{{TO}} --pretty='tformat:%s' --reverse)
+    done < <(git log {{ FROM }}..{{ TO }} --pretty='tformat:%s' --reverse)
 
     section() {
         local title="$1"; shift
@@ -306,10 +319,10 @@ changelog FROM TO="HEAD":
 [group("docker")]
 docker-build:
     docker build \
-        --build-arg VERSION={{VERSION}} \
-        --build-arg COMMIT={{COMMIT}} \
-        --build-arg DATE={{DATE}} \
-        -t url-shortener:{{VERSION}} \
+        --build-arg VERSION={{ VERSION }} \
+        --build-arg COMMIT={{ COMMIT }} \
+        --build-arg DATE={{ DATE }} \
+        -t url-shortener:{{ VERSION }} \
         -t url-shortener:dev \
         .
 
@@ -351,8 +364,8 @@ release-binaries: web-build
     # shell-escaped exactly once -- the rest of the recipe then uses
     # ordinary bash expansion ("$version" / "$ldflags") without
     # worrying about further quoting.
-    version={{quote(VERSION)}}
-    ldflags={{quote(LDFLAGS)}}
+    version={{ quote(VERSION) }}
+    ldflags={{ quote(LDFLAGS) }}
 
     for plat in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
         os="${plat%/*}"
@@ -396,12 +409,12 @@ release-binaries: web-build
 [group("docker")]
 docker-buildx PUSH="":
     docker buildx build \
-        --platform {{PLATFORMS}} \
-        --build-arg VERSION={{VERSION}} \
-        --build-arg COMMIT={{COMMIT}} \
-        --build-arg DATE={{DATE}} \
+        --platform {{ PLATFORMS }} \
+        --build-arg VERSION={{ VERSION }} \
+        --build-arg COMMIT={{ COMMIT }} \
+        --build-arg DATE={{ DATE }} \
         --sbom=true \
         --provenance=mode=max \
-        -t url-shortener:{{VERSION}} \
+        -t url-shortener:{{ VERSION }} \
         {{ if PUSH != "" { "--push" } else { "--output=type=image,push=false" } }} \
         .
