@@ -28,7 +28,26 @@ import (
 // startFullServer spins up a Server with a real Postgres, Redis, and code
 // generator. It skips the test when the URL_SHORTENER_TEST_* env vars are
 // unset (matching the behavior of the per-package integration tests).
+//
+// Most callers only need the base URL + stop func; tests that need to
+// poke the underlying dependencies (e.g. simulate an outage by closing
+// them mid-test) should call startFullServerWithDeps instead.
 func startFullServer(t *testing.T) (string, func()) {
+	t.Helper()
+	base, _, _, stop := startFullServerWithDeps(t)
+	return base, stop
+}
+
+// startFullServerWithDeps is startFullServer plus the live *store.Store
+// and *cache.Client driving the server. Returning them lets a test
+// simulate runtime dependency failure by calling Close on the dep --
+// subsequent /readyz Pings will fail and the handler should flip to 503.
+//
+// The returned deps are still owned by the helper: their Close is
+// already registered via t.Cleanup so calling it early in a test is
+// safe (both Close methods are no-ops or error-ignored on the second
+// call from cleanup).
+func startFullServerWithDeps(t *testing.T) (string, *store.Store, *cache.Client, func()) {
 	t.Helper()
 
 	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
@@ -91,7 +110,7 @@ func startFullServer(t *testing.T) (string, func()) {
 	}
 
 	waitForReady(t, "http://"+ln.Addr().String()+"/healthz")
-	return "http://" + ln.Addr().String(), stop
+	return "http://" + ln.Addr().String(), st, cc, stop
 }
 
 // httpClientNoRedirect is a non-following client so we can inspect 302s.
