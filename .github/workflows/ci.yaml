@@ -43,7 +43,7 @@ jobs:
     # commits, and the squash-merge produces a fresh conventional commit.
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # commitlint runs `just init`, which `npm ci`s the root toolchain
       # (husky + @commitlint/*). Point the npm cache at the root lockfile
       # rather than the Tailwind one, and skip the Go module cache since
@@ -70,7 +70,7 @@ jobs:
       # fetch-depth: 0 so `just build` -> `git describe` can resolve the
       # version string against the most recent tag, producing meaningful
       # `v1.2.3-N-gSHA` ldflags on PR/main builds instead of the bare SHA.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       # `just build` depends on `web-build`, which `npm ci`s the Tailwind +
@@ -97,7 +97,7 @@ jobs:
     steps:
       # Vuln scanning works on source, so a shallow checkout is fine
       # (no `git describe` needed here).
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # Reuse the project-wide toolchain composite. govulncheck doesn't
       # need Node, but the composite always wires it up; the few extra
       # seconds of setup-node aren't worth a special-case input.
@@ -120,13 +120,13 @@ jobs:
     # container and look for OS-level CVEs.
     needs: go
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # `just trivy-image` calls `just docker-build` (the Dockerfile's
       # own builder stages handle Go + npm) and `just trivy-scan`
       # (self-installs trivy into $HOME/.local/bin via BIN_DIR). The
       # host only needs Docker (preinstalled) and just -- no Go or
       # Node toolchain on the runner itself.
-      - uses: extractions/setup-just@v4
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
       # Build the host-arch image and scan it with Trivy. The recipe
       # installs trivy at the version pinned in the Justfile
       # (TRIVY_VERSION) into $HOME/.local/bin -- the same self-install
@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Same fetch-depth: 0 reasoning as the `go` job above.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       # Same toolchain setup as the `go` job: `just test-integration`
@@ -185,7 +185,7 @@ jobs:
     steps:
       # fetch-depth: 0 so the version baked into each binary reflects
       # the distance from the most recent tag (e.g. `v1.2.3-5-gabcdef0`).
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-toolchain
@@ -212,7 +212,7 @@ jobs:
           fi
 
       - name: Upload binaries artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: |
@@ -243,7 +243,7 @@ jobs:
       # fetch-depth: 0 so the version build-arg picked up below reflects
       # the distance from the most recent tag (e.g. `v1.2.3-5-gabcdef0`),
       # not just the bare commit SHA.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
@@ -261,14 +261,14 @@ jobs:
       # The runtime stage is distroless with no RUN steps, so buildx
       # never has to execute target-arch instructions. Add QEMU back
       # if a future change introduces a RUN in a non-BUILDPLATFORM stage.
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       # GHCR login only on main pushes. PRs (incl. forks) skip this and
       # would fail to push anyway -- the build below routes them to an
       # OCI tarball instead.
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -283,7 +283,7 @@ jobs:
       # behaves the way most users expect.
       - name: Derive image tags + labels
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         env:
           # Write annotations onto both the multi-arch manifest index
           # AND each per-platform manifest. GHCR's package UI reads the
@@ -313,7 +313,7 @@ jobs:
 
       - name: Build and push (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -346,7 +346,7 @@ jobs:
       # security-scanning step that may land later.
       - name: Build OCI tarball (PRs)
         if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -368,7 +368,7 @@ jobs:
 
       - name: Upload OCI tarball
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: oci-image-pr-${{ github.event.pull_request.number }}
           path: ./url-shortener-oci.tar
