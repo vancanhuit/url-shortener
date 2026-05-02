@@ -121,16 +121,15 @@ jobs:
     needs: go
     steps:
       - uses: actions/checkout@v6
-      # `just trivy-image` calls `just docker-build`, which calls
-      # `just web-build` (npm). The toolchain composite gets us Go +
-      # Node + a primed npm cache, identical to the `go` job.
-      - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
+      # `just trivy-image` calls `just docker-build` (the Dockerfile's
+      # own builder stages handle Go + npm) and `just trivy-scan`
+      # (self-installs trivy into $HOME/.local/bin via BIN_DIR). The
+      # host only needs Docker (preinstalled) and just -- no Go or
+      # Node toolchain on the runner itself.
+      - uses: extractions/setup-just@v4
       # Build the host-arch image and scan it with Trivy. The recipe
       # installs trivy at the version pinned in the Justfile
-      # (TRIVY_VERSION) into $GOPATH/bin -- the same self-install
+      # (TRIVY_VERSION) into $HOME/.local/bin -- the same self-install
       # pattern used for golangci-lint -- so we avoid the
       # aquasecurity/trivy-action third-party action that was
       # compromised in the March-2026 supply-chain incident.
