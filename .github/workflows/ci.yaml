@@ -253,6 +253,59 @@ jobs:
         if: always()
         run: docker compose --profile=dev down -v
 
+  compose-tls-smoke:
+    name: compose tls smoke test
+    # Bring up the `tls` profile (server-tls + db + redis) with a
+    # mkcert-issued cert generated into an isolated CAROOT, then
+    # verify HTTPS works end-to-end via `curl --cacert`. This is the
+    # production counterpart of `compose-smoke`: same checks, but
+    # against the TLS-terminating variant of the binary, exercising
+    # the cfg.TLSCertFile branch of server.Serve in the same image
+    # users actually deploy.
+    #
+    # The recipe (`just tls-smoke`) handles everything -- mkcert
+    # CAROOT in a tempdir (no host-trust install), compose lifecycle
+    # via trap, and a negative check that omitting --cacert fails
+    # TLS verification. See Justfile::tls-smoke for details.
+    needs: go
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+
+      # mkcert is preinstalled on `ubuntu-latest` (`ubuntu-24.04`)
+      # GitHub-hosted runners as of late 2025; this step is a defensive
+      # fallback so a future runner-image change that drops it doesn't
+      # silently break the smoke test. The apt path also gives us
+      # libnss3-tools, which mkcert calls when populating its CAROOT
+      # (we never run `mkcert -install`, but the dependency is tiny).
+      - name: install mkcert (if missing)
+        run: |
+          if ! command -v mkcert >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y --no-install-recommends mkcert libnss3-tools
+          fi
+          mkcert -version
+
+      - name: just tls-smoke
+        run: just tls-smoke
+
+      # Always: dump server-tls logs so a failure has its evidence in
+      # the job log. The recipe's trap already runs `down -v`, so by
+      # this point the container is gone -- but `logs` still works
+      # against stopped containers until compose's network is removed,
+      # which the trap also does. Use `|| true` so log retrieval failure
+      # never masks a real test failure.
+      - name: docker compose logs (server-tls)
+        if: always()
+        run: docker compose --profile=tls logs --no-color --tail=200 server-tls || true
+
   binaries:
     name: binaries
     # Cross-compile the binary for linux/darwin x amd64/arm64 and upload

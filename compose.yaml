@@ -171,8 +171,12 @@ services:
       URL_SHORTENER_AUTO_MIGRATE: "true"
       URL_SHORTENER_TLS_CERT_FILE: /etc/url-shortener/certs/cert.pem
       URL_SHORTENER_TLS_KEY_FILE: /etc/url-shortener/certs/key.pem
+    # Cert source defaults to ./dev/certs (the dir `just dev-certs`
+    # writes to). The `just tls-smoke` recipe overrides this with
+    # TLS_CERTS_DIR pointing at an isolated tempdir so the smoke run
+    # never clobbers a developer's host-trusted dev certs.
     volumes:
-      - ./dev/certs:/etc/url-shortener/certs:ro
+      - ${TLS_CERTS_DIR:-./dev/certs}:/etc/url-shortener/certs:ro
     ports:
       - "8443:8443"
     # `--insecure` because the in-container loopback hop probes

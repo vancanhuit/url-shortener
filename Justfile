@@ -375,6 +375,98 @@ compose-smoke BASE_URL="http://localhost:8080":
 
     echo "ok"
 
+# Smoke-test the `tls` compose profile end-to-end with an isolated
+# mkcert root CA. Unlike `just dev-certs` this never touches the
+# host's trust store (no `mkcert -install`); the leaf cert is
+# verified through `curl --cacert` against the just-created root,
+# which is exactly the pattern CI needs and a useful regression
+# check for the TLS path locally.
+#
+# What the recipe does, in order:
+#
+#   1. Allocate a tempdir as CAROOT and mkcert-write the root CA
+#      + leaf cert there. Both die with the tempdir at the end.
+#   2. Bring up `--profile=tls` with TLS_CERTS_DIR pointing at the
+#      tempdir's certs/ subdir, so the existing `dev/certs/`
+#      contents are untouched.
+#   3. Hit /healthz, /readyz, /version over HTTPS with
+#      `--cacert <tempdir>/rootCA.pem` -- a strict check that the
+#      server is actually serving the cert we just signed.
+#   4. Tear down on exit (success or failure) via trap.
+#
+# Requires mkcert + curl + jq on PATH. mkcert install instructions
+# are in the dev-certs recipe doc-comment.
+[group("test")]
+tls-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v mkcert >/dev/null 2>&1; then
+        echo 'mkcert not found on PATH; see `just dev-certs` for install instructions.' >&2
+        exit 1
+    fi
+
+    workdir=$(mktemp -d -t url-shortener-tls-smoke-XXXXXX)
+    export TLS_CERTS_DIR="$workdir/certs"
+    mkdir -p "$TLS_CERTS_DIR"
+
+    cleanup() {
+        local rc=$?
+        echo "== teardown =="
+        docker compose --profile=tls down -v --remove-orphans >/dev/null 2>&1 || true
+        rm -rf "$workdir"
+        exit $rc
+    }
+    trap cleanup EXIT
+
+    echo "== mkcert (isolated CAROOT=$workdir/ca) =="
+    # CAROOT redirects mkcert's CA storage; -install is intentionally
+    # omitted so the host trust store stays unchanged. The leaf cert
+    # is signed for localhost + 127.0.0.1 + ::1 to match what the
+    # compose service binds.
+    export CAROOT="$workdir/ca"
+    mkdir -p "$CAROOT"
+    mkcert \
+        -cert-file "$TLS_CERTS_DIR/cert.pem" \
+        -key-file  "$TLS_CERTS_DIR/key.pem" \
+        localhost 127.0.0.1 ::1 >/dev/null
+    # Distroless container's nonroot UID needs world-readable key
+    # to read it through the bind mount; matches what dev-certs
+    # does for the same reason.
+    chmod 0644 "$TLS_CERTS_DIR/key.pem"
+    cacert="$CAROOT/rootCA.pem"
+    test -f "$cacert" || { echo "rootCA.pem not at $cacert" >&2; exit 1; }
+
+    echo "== docker compose --profile=tls up --wait =="
+    docker compose --profile=tls up --wait --detach
+
+    base="https://localhost:8443"
+
+    echo "== /healthz (curl --cacert) =="
+    curl --fail-with-body -sS --cacert "$cacert" "$base/healthz" \
+        | tee /dev/stderr | jq -e '.status == "ok"' >/dev/null
+
+    echo "== /readyz =="
+    curl --fail-with-body -sS --cacert "$cacert" "$base/readyz" \
+        | tee /dev/stderr \
+        | jq -e '.status == "ok" and .postgres == "ok" and .redis == "ok"' >/dev/null
+
+    echo "== /version =="
+    curl --fail-with-body -sS --cacert "$cacert" "$base/version" \
+        | tee /dev/stderr | jq -e 'has("version")' >/dev/null
+
+    # Negative check: without --cacert (no host-trust install), the
+    # request must fail at TLS verification. Proves the certificate
+    # chain is genuinely walked rather than e.g. the compose stack
+    # serving a default fallback that happens to match.
+    echo "== curl without --cacert must fail TLS verification =="
+    if curl --fail-with-body -sS -o /dev/null "$base/healthz" 2>/dev/null; then
+        echo "expected TLS verification failure, got success" >&2
+        exit 1
+    fi
+
+    echo "ok"
+
 # --- release ------------------------------------------------------------------
 
 # Lint just the most recent commit message.
