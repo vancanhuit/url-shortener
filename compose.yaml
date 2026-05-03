@@ -1,22 +1,33 @@
 # Local development & integration-test stack.
 #
-# Default services (no profile): `db`, `redis`, and `server` -- the full
-# local dev loop on standard ports (5432 / 6379 / 8080). Bring it up with
-# `docker compose up --wait -d`. The server has AUTO_MIGRATE=true so it
-# applies pending migrations before opening the listener; production
-# deploys should leave AUTO_MIGRATE off and run `migrate up` as a
-# separate one-shot step.
+# Two profiles, both selected explicitly:
 #
-# `test` profile: `db-test` and `redis-test` on alternate host ports
-# (5433 / 6380) with their own volumes. Used by `just test-integration`,
-# which runs the binary from the host. Alternate ports + volumes mean
-# the dev stack and the test stack can coexist without conflict, so a
-# running dev environment doesn't have to be torn down to run the
-# integration suite.
+#   `dev` profile  -- `db`, `redis`, `server`
+#     Full local dev loop on standard ports (5432 / 6379 / 8080).
+#     The server has AUTO_MIGRATE=true so it applies pending migrations
+#     before opening the listener; production deploys should leave
+#     AUTO_MIGRATE off and run `migrate up` as a separate one-shot.
+#     Same stack drives the CI compose-smoke job.
 #
-# Tear down with `docker compose --profile test down -v` -- the
-# `--profile test` flag is required to remove the test-only services.
-# Without it, only the default-profile services are removed.
+#       Bring up:  docker compose --profile=dev up --wait -d
+#       Tear down: docker compose --profile=dev down -v
+#
+#   `test` profile -- `db-test`, `redis-test`
+#     Isolated db + redis on alternate host ports (5433 / 6380) with
+#     their own volumes. Driven by `just test-integration`, which runs
+#     the binary from the host. Alternate ports + volumes mean dev and
+#     test stacks coexist, so a running dev environment doesn't have
+#     to be torn down to run the integration suite.
+#
+#       Bring up:  docker compose --profile=test up --wait -d
+#       Tear down: docker compose --profile=test down -v
+#
+# Every service belongs to exactly one profile, so a bare
+# `docker compose up` starts nothing. That's intentional: the previous
+# arrangement (default services + a test profile) had compose start the
+# default services *in addition to* test ones whenever `--profile=test`
+# was passed, because no-profile services run for every invocation.
+# Forcing both profiles to be opt-in eliminates that accidental overlap.
 
 name: url-shortener
 
@@ -51,8 +62,13 @@ x-redis-base: &redis-base
   restart: unless-stopped
 
 services:
+  # --- `dev` profile --------------------------------------------------------
+  # Full local dev loop and the same stack the CI compose-smoke job
+  # exercises. See file header for invocation.
+
   db:
     <<: *postgres-base
+    profiles: ["dev"]
     # Postgres 18+ expects a single mount at /var/lib/postgresql; the actual
     # data dir lives in a versioned subdirectory inside it (e.g. 18/docker).
     volumes:
@@ -62,6 +78,7 @@ services:
 
   redis:
     <<: *redis-base
+    profiles: ["dev"]
     volumes:
       - redis_data:/data
     ports:
@@ -71,6 +88,7 @@ services:
   # applies pending migrations before opening the listener, so the stack
   # is fully ready as soon as `up --wait` returns.
   server:
+    profiles: ["dev"]
     build:
       context: .
       dockerfile: Dockerfile

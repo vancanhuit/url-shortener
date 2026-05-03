@@ -187,6 +187,72 @@ jobs:
         if: always()
         run: docker compose --profile=test down -v
 
+  compose-smoke:
+    name: compose smoke test
+    # Bring up the `dev` profile of compose.yaml (the same stack a
+    # developer runs locally) and exercise the operational endpoints,
+    # the embedded static assets, and a real shorten -> fetch ->
+    # redirect cycle. Other CI jobs cover compile / unit / integration
+    # / scan in isolation; this is the one that catches "binary builds
+    # clean but the image doesn't actually serve" -- a missing COPY
+    # for an embedded asset, a Dockerfile drift away from what the
+    # binary expects, an env-var rename that silently broke a Postgres
+    # 18 connection string, etc. Keeps compose.yaml itself honest too:
+    # any field that drifts away from what the runner's compose plugin
+    # accepts breaks the PR rather than a developer's first `up --wait`.
+    #
+    # Runs in parallel with the `image` job below: both build the same
+    # Dockerfile independently. Sharing the GHA cache via compose's
+    # build block isn't worth threading through here -- `image` is the
+    # critical-path job (~2m), `compose-smoke` finishes well within
+    # that even with a cold build.
+    needs: go
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Compose v2 already drives BuildKit by default on hosted runners;
+      # making buildx explicit here is just defensive against future
+      # runner-image changes that flip the default back.
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      # The smoke-check script is encapsulated in a Justfile recipe
+      # (`just compose-smoke`) so dev iteration doesn't need a CI
+      # round-trip; setup-just installs the binary used to run it.
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+
+      # `--wait` blocks until each service's healthcheck reports
+      # healthy. The server's healthcheck invokes the binary's own
+      # `healthcheck` subcommand, which dials its own /healthz, so by
+      # the time `up` returns the listener is accepting traffic.
+      # AUTO_MIGRATE=true (set in compose.yaml) ensures the schema is
+      # applied before that point.
+      - name: docker compose --profile=dev up --wait
+        run: docker compose --profile=dev up --wait --detach
+
+      # The recipe targets http://localhost:8080 by default, which is
+      # the dev-profile published port. See Justfile::compose-smoke for
+      # the actual checks (operational endpoints, embedded static
+      # assets, full shorten -> fetch -> redirect cycle).
+      - name: just compose-smoke
+        run: just compose-smoke
+
+      # Always: dump server logs so a failure has its evidence in the
+      # job log without having to re-run with debug. `--no-color`
+      # keeps the output diffable; --tail caps log volume.
+      - name: docker compose logs (server)
+        if: always()
+        run: docker compose --profile=dev logs --no-color --tail=200 server
+
+      - name: docker compose --profile=dev down -v
+        if: always()
+        run: docker compose --profile=dev down -v
+
   binaries:
     name: binaries
     # Cross-compile the binary for linux/darwin x amd64/arm64 and upload
