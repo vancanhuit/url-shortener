@@ -571,6 +571,53 @@ git push --force-with-lease
   web-flow key, so `required_signatures` is satisfied even when
   squashing. Squash-merge keeps working unchanged.
 
+## Dependency updates
+
+Automated via [Dependabot](https://docs.github.com/en/code-security/dependabot),
+configured in [`.github/dependabot.yml`](.github/dependabot.yml). Five
+ecosystems, weekly Monday cadence, grouped per ecosystem so a typical
+week produces one PR per group rather than N separate PRs:
+
+| Ecosystem        | Source                                       | Group name                       |
+| ---------------- | -------------------------------------------- | -------------------------------- |
+| `gomod`          | `go.mod`                                     | `gomod-minor-and-patch`          |
+| `github-actions` | `.github/workflows/*.yaml` (SHA-pinned)      | `actions-minor-and-patch`        |
+| `npm` (root)     | `package.json` (husky + commitlint)          | `npm-root-minor-and-patch`       |
+| `npm` (tailwind) | `web/tailwind/package.json`                  | `npm-tailwind-minor-and-patch`   |
+| `docker`         | `Dockerfile` `FROM` lines (golang, node, distroless) | `docker-minor-and-patch` |
+
+Major-version bumps stay outside the groups and arrive as individual
+PRs; that's deliberate, since major releases (e.g. `actions/checkout`
+v5 dropping Node 16, Go module APIs changing) often need targeted
+review against the test suite. Commit messages use the `chore(deps)`
+/ `chore(deps-dev)` prefix to satisfy `commitlint`.
+
+### Interaction with the `main` ruleset
+
+Dependabot PRs flow through the same gates as any other PR:
+
+- **Required CI checks** &mdash; the standard `ci.yaml` jobs
+  (`go (build / test / lint)`, `compose smoke test`, etc.) run on
+  every Dependabot PR; merging is blocked until they all pass.
+- **Signed commits** &mdash; Dependabot's commits on the source
+  branch are signed by the `dependabot[bot]` GPG key (verified by
+  GitHub); the squash-merge commit on `main` is signed by GitHub's
+  web-flow key (also verified). `required_signatures` is satisfied
+  end-to-end.
+- **Up-to-date branch** &mdash; Dependabot rebases its PRs when
+  `main` advances, so `strict_required_status_checks_policy: true`
+  doesn't strand them.
+
+### Unmanaged: `compose.yaml` images
+
+Dependabot's `docker` ecosystem only scans `Dockerfile`, not
+`compose.yaml`. The `postgres` and `redis` image tags in
+[`compose.yaml`](compose.yaml) therefore need a manual bump; check
+them quarterly or whenever a major version of either ships. The
+release-binary `--version` of postgres can be confirmed against the
+[official tags page](https://hub.docker.com/_/postgres/tags) before
+a bump PR.
+
 ## License
 
 To be added.
