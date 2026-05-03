@@ -307,14 +307,17 @@ tidy:
 #   just compose-smoke
 #   docker compose --profile=dev down -v
 #
-# `BASE_URL` defaults to the dev profile's published port; override for
-# alternate setups (e.g. a port-forwarded staging server). Requires curl
-# and jq on PATH; both ship preinstalled on the GitHub-hosted runners.
+# Targets the dev profile's published port directly; the smoke is
+# tightly coupled to that stack (it asserts the embedded static
+# assets, the shorten/redirect cycle, etc.) so making the URL
+# configurable just invited misuse against unrelated environments.
+# Requires curl and jq on PATH; both ship preinstalled on the
+# GitHub-hosted runners.
 [group("test")]
-compose-smoke BASE_URL="http://localhost:8080":
+compose-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
-    base={{ quote(BASE_URL) }}
+    base="http://localhost:8080"
 
     echo "== /healthz =="
     curl --fail-with-body -sS "$base/healthz" \
