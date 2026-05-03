@@ -1,0 +1,127 @@
+# Apply branch-protection-as-code from `.github/rulesets/*.json` to the
+# repo's native ruleset configuration.
+#
+# Idempotent: each JSON file declares a `name`, the workflow looks the
+# ruleset up by name and either PUTs (update in place) or POSTs (create
+# new). Re-running on an unchanged file is a no-op as far as the
+# ruleset's enforcement is concerned -- GitHub returns 200 either way.
+#
+# Why a workflow rather than `terraform apply` from a developer laptop:
+# - state is the GitHub API itself, so there's no `tfstate` to keep
+#   anywhere; the JSON in this repo is the only source of truth
+# - reviewers can see the ruleset diff in the PR that changes it
+# - drift introduced through the GitHub UI is reverted on the next
+#   push that touches `.github/rulesets/`, which is the desired
+#   "infrastructure-as-code" property
+#
+# Why a separate workflow rather than a step in `ci.yaml`:
+# - it needs a different token (a PAT or App token with
+#   `Administration: write` -- the default `GITHUB_TOKEN` cannot
+#   manage rulesets); keeping the elevated credential out of the
+#   common CI path limits its blast radius if a CI step ever gets
+#   compromised
+# - it should only fire on changes that affect the ruleset
+#   definition, not on every PR
+#
+# Token setup (one-time, by a repo admin):
+# - Create a fine-grained PAT scoped to `vancanhuit/url-shortener`
+#   with `Administration: Read and write` permission
+# - Store it as the `RULESETS_TOKEN` repository secret
+# - Trigger this workflow once via "Run workflow" so the initial
+#   ruleset is applied; thereafter it runs automatically whenever
+#   anything under `.github/rulesets/` changes on `main`
+name: sync rulesets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/rulesets/**
+      - .github/workflows/sync-rulesets.yaml
+  workflow_dispatch:
+
+# Default to no permissions on the GITHUB_TOKEN; the API calls below
+# use `RULESETS_TOKEN` instead. checkout still works against a public
+# repo without any contents:read permission, but we grant it for the
+# private-repo path too.
+permissions: {}
+
+# Serialize: two concurrent runs racing the same `PUT /rulesets/{id}`
+# would still converge (idempotent), but a stale run completing after
+# a newer one would overwrite the newer config. `cancel-in-progress`
+# avoids that by killing the older run when a newer one starts.
+concurrency:
+  group: sync-rulesets
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: sync repository rulesets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Fail fast with a clear message when the PAT secret is missing.
+      # Without this, `gh api` would emit a generic "HTTP 401: Bad
+      # credentials" that doesn't point at the cause.
+      - name: verify RULESETS_TOKEN is set
+        env:
+          RULESETS_TOKEN: ${{ secrets.RULESETS_TOKEN }}
+        run: |
+          if [ -z "${RULESETS_TOKEN:-}" ]; then
+            echo "::error::RULESETS_TOKEN secret is not set. See README ('Branch protection' section) for the one-time PAT setup."
+            exit 1
+          fi
+
+      # `gh api` reads $GH_TOKEN; explicitly passing the PAT keeps the
+      # default GITHUB_TOKEN out of the call (it lacks the required
+      # `Administration: write` scope anyway, but defense in depth).
+      #
+      # For each JSON file under .github/rulesets/, look up the
+      # ruleset by its declared `name`. If found, PUT to update in
+      # place; otherwise POST to create. The API tolerates the same
+      # JSON shape for both verbs (the URL path carries the id on
+      # PUT, and any `id` field in the body is ignored).
+      - name: apply rulesets
+        env:
+          GH_TOKEN: ${{ secrets.RULESETS_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          rulesets=(.github/rulesets/*.json)
+          if [ ${#rulesets[@]} -eq 0 ]; then
+            echo "::warning::no ruleset files under .github/rulesets/"
+            exit 0
+          fi
+
+          # List existing rulesets once; reuse for every file.
+          existing=$(gh api "/repos/$REPO/rulesets")
+
+          for file in "${rulesets[@]}"; do
+            name=$(jq -r '.name' "$file")
+            if [ -z "$name" ] || [ "$name" = "null" ]; then
+              echo "::error file=$file::missing top-level 'name' field"
+              exit 1
+            fi
+
+            id=$(echo "$existing" | jq -r --arg n "$name" '.[] | select(.name == $n) | .id')
+
+            if [ -n "$id" ] && [ "$id" != "null" ]; then
+              echo "== updating ruleset name=$name id=$id =="
+              gh api --method PUT "/repos/$REPO/rulesets/$id" \
+                --input "$file" \
+                --jq '{name, target, enforcement, rules: [.rules[].type]}'
+            else
+              echo "== creating ruleset name=$name =="
+              gh api --method POST "/repos/$REPO/rulesets" \
+                --input "$file" \
+                --jq '{id, name, target, enforcement, rules: [.rules[].type]}'
+            fi
+          done

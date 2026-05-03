@@ -1,0 +1,47 @@
+{
+  "name": "main-branch-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "required_linear_history" },
+    { "type": "required_signatures" },
+    { "type": "required_conversation_resolution" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "commitlint",                "integration_id": 15368 },
+          { "context": "go (build / test / lint)",  "integration_id": 15368 },
+          { "context": "govulncheck",               "integration_id": 15368 },
+          { "context": "trivy (image scan)",        "integration_id": 15368 },
+          { "context": "go (integration)",          "integration_id": 15368 },
+          { "context": "compose smoke test",        "integration_id": 15368 },
+          { "context": "binaries",                  "integration_id": 15368 },
+          { "context": "docker image",              "integration_id": 15368 },
+          { "context": "analyze (go)",              "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}
