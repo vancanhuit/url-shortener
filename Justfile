@@ -347,54 +347,50 @@ commitlint-last:
 commitlint-msg MSG:
     @echo {{ quote(MSG) }} | npx --no -- commitlint
 
-# Generate a release-notes markdown body for commits in (FROM, TO], grouped
-# by conventional-commit type. The release workflow pipes this into the GH
-# Release body when a new tag is pushed; it's also handy locally to preview
-# what a release would say.
+# Generate a release-notes markdown body via git-cliff (cliff.toml at the
+# repo root). The release workflow pipes the same output into the GH
+# Release body when a new tag is pushed; this recipe is for local preview
+# of what a release would say.
+#
+# git-cliff itself is not pinned in the repo -- install it once:
+#
+#     # Linux:
+#     curl -sSL "https://github.com/orhun/git-cliff/releases/latest/download/\
+#     git-cliff-$(uname -m)-unknown-linux-gnu.tar.gz" | tar -xz -C /tmp \
+#     && sudo install -m 0755 /tmp/git-cliff-*/git-cliff /usr/local/bin/git-cliff
+#
+#     # macOS:
+#     brew install git-cliff
+#
+# Output is written to dist/CHANGELOG.md (gitignored, same path the
+# release workflow uses) and also echoed to stdout so the recipe
+# composes with `| less`, redirection, etc.
 #
 # Usage:
-#   just changelog v0.1.0            # since v0.1.0, up to HEAD
-#   just changelog v0.1.0 v0.2.0     # between two tags
+#   just changelog                    # unreleased commits (latest tag .. HEAD)
+#   just changelog v0.1.0             # since v0.1.0 .. HEAD
+#   just changelog v0.1.0 v0.2.0      # explicit range
 [group("release")]
-changelog FROM TO="HEAD":
+changelog FROM="" TO="HEAD":
     #!/usr/bin/env bash
     set -euo pipefail
-
-    feats=()
-    fixes=()
-    perfs=()
-    refacs=()
-    docs_=()
-    others=()
-
-    # `tformat:` (vs `format:`) terminates every line with a newline so
-    # `read` doesn't drop the final entry when the range has a single
-    # commit. `--reverse` so the per-type lists read chronologically.
-    while IFS= read -r line; do
-        case "$line" in
-            "feat:"*|"feat("*)         feats+=("$line") ;;
-            "fix:"*|"fix("*)           fixes+=("$line") ;;
-            "perf:"*|"perf("*)         perfs+=("$line") ;;
-            "refactor:"*|"refactor("*) refacs+=("$line") ;;
-            "docs:"*|"docs("*)         docs_+=("$line") ;;
-            "build:"*|"build("*|"chore:"*|"chore("*|"ci:"*|"ci("*|"style:"*|"style("*|"test:"*|"test("*) others+=("$line") ;;
-        esac
-    done < <(git log {{ FROM }}..{{ TO }} --pretty='tformat:%s' --reverse)
-
-    section() {
-        local title="$1"; shift
-        if [ "$#" -gt 0 ]; then
-            printf '\n### %s\n\n' "$title"
-            for it in "$@"; do printf -- '- %s\n' "$it"; done
-        fi
-    }
-
-    section "Features"    "${feats[@]+"${feats[@]}"}"
-    section "Bug Fixes"   "${fixes[@]+"${fixes[@]}"}"
-    section "Performance" "${perfs[@]+"${perfs[@]}"}"
-    section "Refactors"   "${refacs[@]+"${refacs[@]}"}"
-    section "Docs"        "${docs_[@]+"${docs_[@]}"}"
-    section "Other"       "${others[@]+"${others[@]}"}"
+    from='{{ FROM }}'
+    to='{{ TO }}'
+    if [ -z "$from" ]; then
+        # Resolve the latest semver tag reachable from $to. On a fresh repo
+        # with no tags yet, fall through to `git-cliff --tag $to` (full
+        # history rendered as if tagging now).
+        from=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$to" 2>/dev/null || true)
+    fi
+    mkdir -p dist
+    out=dist/CHANGELOG.md
+    if [ -n "$from" ]; then
+        git-cliff --config cliff.toml --tag "$to" --output "$out" "$from..$to"
+    else
+        git-cliff --config cliff.toml --tag "$to" --output "$out"
+    fi
+    echo "wrote $out:" >&2
+    cat "$out"
 
 # --- docker -------------------------------------------------------------------
 

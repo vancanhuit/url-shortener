@@ -83,8 +83,11 @@ To cut a release locally:
 # 1. Make sure main is green and you're up to date.
 git checkout main && git pull --ff-only
 
-# 2. Preview what the release notes will say.
-just changelog "$(git describe --tags --abbrev=0 --match 'v[0-9]*')" HEAD
+# 2. Preview what the release notes will say. With no arguments, the
+#    recipe auto-resolves the previous semver tag and renders commits
+#    from there to HEAD. Output matches what the release workflow
+#    emits, since both invoke git-cliff against the same cliff.toml.
+just changelog
 
 # 3. Tag and push. The workflow takes it from there.
 git tag -a v1.2.3 -m "v1.2.3"

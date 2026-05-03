@@ -189,18 +189,18 @@ jobs:
       - name: Build release binaries
         run: just release-binaries
 
-      # Resolve the immediately-preceding semver tag so the changelog
-      # range is "(prev_tag, this_tag]". On the very first release there
-      # is no previous tag; fall back to the root commit so the body
-      # captures everything ever shipped.
-      - name: Resolve previous tag
-        id: prev
-        run: |
-          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${{ github.ref_name }}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
-          echo "ref=$prev" >> "$GITHUB_OUTPUT"
-
-      - name: Generate changelog
-        run: just changelog "${{ steps.prev.outputs.ref }}" "${{ github.ref_name }}" > dist/CHANGELOG.md
+      # Generate release-notes markdown for the (prev_tag, this_tag]
+      # range using git-cliff (cliff.toml). `--current` auto-resolves
+      # the previous semver tag from git's tag graph, so we don't need
+      # the prior `git describe` shuffle. Output is written to
+      # dist/CHANGELOG.md via the action's $OUTPUT env contract.
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
+        with:
+          config: cliff.toml
+          args: --current
+        env:
+          OUTPUT: dist/CHANGELOG.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0

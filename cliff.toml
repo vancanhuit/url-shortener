@@ -1,0 +1,87 @@
+# git-cliff configuration -- https://git-cliff.org/docs/configuration
+#
+# Produces release-body markdown for the (PREV_TAG, THIS_TAG] range.
+# The release.yaml workflow pipes the output into softprops/action-gh-release
+# as `body_path`, so the rendered template must NOT include a top-level
+# version header (the GitHub Releases page already shows the tag name);
+# only group sections + bullet lists + a compare-link footer.
+#
+# Style notes:
+# - Emoji group headings so the Releases UI is scannable at a glance.
+# - Breaking changes lifted into a dedicated section at the top AND
+#   kept in their normal type group with a **BREAKING:** prefix, so a
+#   reader scanning Features can't miss a behavioural break.
+# - Commit messages rendered as-is (GitHub's squash-merge keeps the
+#   `(#NN)` suffix that GitHub markdown auto-links).
+# - Trailing "Full Changelog: prev...this" compare link, matching the
+#   GitHub "Auto-generated release notes" convention.
+
+[changelog]
+header = ""
+trim = true
+
+body = """
+{%- macro commit_line(commit) -%}
+- {% if commit.breaking %}**BREAKING:** {% endif %}\
+{%- if commit.scope %}**{{ commit.scope }}**: {% endif -%}\
+{{ commit.message | split(pat="\n") | first | trim }}
+{%- endmacro -%}
+{%- set breaking = commits | filter(attribute="breaking", value=true) -%}
+{%- if breaking | length > 0 %}
+### ⚠ Breaking Changes
+
+{% for commit in breaking -%}
+{{ self::commit_line(commit=commit) }}
+{% endfor %}
+{%- endif -%}
+{%- for group, group_commits in commits | filter(attribute="group") | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in group_commits -%}
+{{ self::commit_line(commit=commit) }}
+{% endfor %}
+{%- endfor -%}
+{%- if previous and previous.version %}
+
+**Full Changelog**: https://github.com/vancanhuit/url-shortener/compare/{{ previous.version }}...{{ version }}
+{% endif -%}
+"""
+
+[git]
+# Parse Conventional Commits (feat / fix / etc.) and bucket by type.
+conventional_commits = true
+# Drop commits that don't match `commit_parsers` (e.g. merge commits, empty
+# reverts) entirely, keeping the changelog focused on real changes.
+filter_unconventional = true
+filter_commits = true
+split_commits = false
+# `feat!:` / `BREAKING CHANGE:` footer lines must propagate breaking=true
+# even if the type itself is set to skip.
+protect_breaking_commits = true
+# Render commits within a group oldest-first, matching the prior bash
+# recipe's `git log --reverse` ordering.
+sort_commits = "oldest"
+topo_order = true
+
+# `<!-- N -->` prefix forces a stable group sort order while being stripped
+# from the rendered heading via `striptags` in the body template. Emoji
+# headings are widely recognised on GitHub Releases and make the section
+# list scannable without becoming noisy.
+commit_parsers = [
+  { message = "^feat",                  group = "<!-- 0 -->🚀 Features" },
+  { message = "^fix",                   group = "<!-- 1 -->🐛 Bug Fixes" },
+  { message = "^perf",                  group = "<!-- 2 -->⚡ Performance" },
+  { message = "^refactor",              group = "<!-- 3 -->♻️ Refactors" },
+  { message = "^revert",                group = "<!-- 4 -->⏪ Reverts" },
+  { message = "^docs",                  group = "<!-- 5 -->📚 Documentation" },
+  { message = "^test",                  group = "<!-- 6 -->🧪 Tests" },
+  { message = "^build",                 group = "<!-- 7 -->🏗️ Build" },
+  { message = "^ci",                    group = "<!-- 7 -->🏗️ Build" },
+  # Surface dependency bumps from Dependabot as their own section (more
+  # informative than lumping them in with hand-authored build changes).
+  # Plain `chore` and `style` are dropped from release notes since they
+  # don't affect users.
+  { message = "^chore\\(deps",          group = "<!-- 8 -->📦 Dependencies" },
+  { message = "^chore",                 skip  = true },
+  { message = "^style",                 skip  = true },
+]
