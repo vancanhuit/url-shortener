@@ -1,0 +1,3 @@
+# mkcert-generated dev certs (host-trusted, but never committed --
+# every contributor regenerates locally with `just dev-certs`).
+*.pem

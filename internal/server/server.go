@@ -85,6 +85,20 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	}
 
 	e := echo.New()
+
+	// IPExtractor is consulted by Context.RealIP() and by the request
+	// logger's LogRemoteIP path. With cfg.TrustedProxies empty (the
+	// default), we leave IPExtractor unset so Echo falls back to its
+	// legacy RemoteAddr-based behavior -- equivalent to "no proxy in
+	// front", which is correct for direct deployments and for the
+	// docker compose stack today. When CIDRs are configured, install
+	// an XFF-aware extractor that only honors the header when the
+	// immediate peer falls inside one of those ranges; spoofed XFF
+	// from untrusted clients is ignored.
+	if extractor := buildIPExtractor(cfg.TrustedProxies); extractor != nil {
+		e.IPExtractor = extractor
+	}
+
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
 	e.Use(slogRequestLogger(logger))
@@ -159,11 +173,31 @@ func (s *Server) Run(ctx context.Context) error {
 // Serve runs the HTTP server using the provided already-bound listener. It
 // blocks until ctx is canceled and then shuts down gracefully. Tests use
 // this with a port-0 listener so they can pick up the bound address.
+//
+// When cfg.TLSCertFile and cfg.TLSKeyFile are both set, the server speaks
+// HTTPS on the listener; otherwise it speaks plain HTTP. The TLS path
+// uses http.Server.ServeTLS, which loads the cert+key on each call;
+// config.Validate already stat'd both paths at startup so a bad path
+// would have failed earlier with a clear error.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	errCh := make(chan error, 1)
+	tlsEnabled := s.cfg.TLSCertFile != "" && s.cfg.TLSKeyFile != ""
 	go func() {
-		s.logger.Info("http server starting", "addr", ln.Addr().String())
-		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		s.logger.Info("http server starting",
+			"addr", ln.Addr().String(),
+			"tls", tlsEnabled,
+		)
+		var err error
+		if tlsEnabled {
+			// ServeTLS reads cert+key from disk on every call. The
+			// http.Server.TLSConfig is left at its zero value so Go's
+			// secure defaults apply (TLS 1.2+ minimum from Go 1.18,
+			// modern cipher suites with HTTP/2 support).
+			err = s.http.ServeTLS(ln, s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+		} else {
+			err = s.http.Serve(ln)
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 		close(errCh)
@@ -233,6 +267,7 @@ func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 		LogMethod:    true,
 		LogLatency:   true,
 		LogRequestID: true,
+		LogRemoteIP:  true,
 		HandleError:  true,
 		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
 			level := slog.LevelInfo
@@ -249,6 +284,7 @@ func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 				"status", v.Status,
 				"latency_ms", v.Latency.Milliseconds(),
 				"request_id", v.RequestID,
+				"remote_ip", v.RemoteIP,
 			}
 			if v.Error != nil {
 				attrs = append(attrs, "error", v.Error.Error())

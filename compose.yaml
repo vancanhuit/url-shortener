@@ -22,12 +22,28 @@
 #       Bring up:  docker compose --profile=test up --wait -d
 #       Tear down: docker compose --profile=test down -v
 #
-# Every service belongs to exactly one profile, so a bare
-# `docker compose up` starts nothing. That's intentional: the previous
-# arrangement (default services + a test profile) had compose start the
-# default services *in addition to* test ones whenever `--profile=test`
-# was passed, because no-profile services run for every invocation.
-# Forcing both profiles to be opt-in eliminates that accidental overlap.
+#   `tls` profile  -- `db`, `redis`, `server-tls`
+#     Mirrors `dev` but the binary speaks HTTPS on :8443 using a static
+#     cert + key mounted from `./dev/certs/` (generate them once with
+#     `just dev-certs`, gitignored). `db` and `redis` are reused via
+#     multi-profile membership; the `tls` profile also exposes them on
+#     the same standard host ports as `dev` so the two profiles must
+#     not be running simultaneously.
+#
+#       Prereq:    just dev-certs        (one-time per host)
+#       Bring up:  docker compose --profile=tls up --wait -d
+#       Tear down: docker compose --profile=tls down -v
+#       Test:      curl https://localhost:8443/healthz
+#
+# Every service is profile-gated, so a bare `docker compose up` starts
+# nothing. That's intentional: the previous arrangement (default
+# services + a test profile) had compose start the default services
+# *in addition to* test ones whenever `--profile=test` was passed,
+# because no-profile services run for every invocation. Forcing every
+# profile to be opt-in eliminates that accidental overlap.
+# `db` and `redis` are members of both `dev` and `tls` so the two
+# profiles share the same data store; only one can run at a time
+# because they bind the same host ports (5432 / 6379).
 
 name: url-shortener
 
@@ -68,7 +84,7 @@ services:
 
   db:
     <<: *postgres-base
-    profiles: ["dev"]
+    profiles: ["dev", "tls"]
     # Postgres 18+ expects a single mount at /var/lib/postgresql; the actual
     # data dir lives in a versioned subdirectory inside it (e.g. 18/docker).
     volumes:
@@ -78,7 +94,7 @@ services:
 
   redis:
     <<: *redis-base
-    profiles: ["dev"]
+    profiles: ["dev", "tls"]
     volumes:
       - redis_data:/data
     ports:
@@ -118,6 +134,55 @@ services:
     # started").
     healthcheck:
       test: ["CMD", "/usr/local/bin/url-shortener", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # --- `tls` profile --------------------------------------------------------
+  # Same binary as `server`, but speaks HTTPS on :8443 using the cert +
+  # key in ./dev/certs/ (run `just dev-certs` to generate them; both
+  # files are gitignored). The compose volume is read-only so an
+  # accidental rotation in the running container can't truncate the
+  # PEM files on the host.
+
+  server-tls:
+    profiles: ["tls"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+        COMMIT: dev
+    command: ["run"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      URL_SHORTENER_ADDR: ":8443"
+      URL_SHORTENER_ENV: dev
+      URL_SHORTENER_LOG_LEVEL: debug
+      URL_SHORTENER_LOG_FORMAT: text
+      URL_SHORTENER_DATABASE_URL: postgres://postgres:postgres@db:5432/url_shortener?sslmode=disable
+      URL_SHORTENER_REDIS_URL: redis://redis:6379/0
+      URL_SHORTENER_BASE_URL: https://localhost:8443
+      URL_SHORTENER_AUTO_MIGRATE: "true"
+      URL_SHORTENER_TLS_CERT_FILE: /etc/url-shortener/certs/cert.pem
+      URL_SHORTENER_TLS_KEY_FILE: /etc/url-shortener/certs/key.pem
+    volumes:
+      - ./dev/certs:/etc/url-shortener/certs:ro
+    ports:
+      - "8443:8443"
+    # `--insecure` because the in-container loopback hop probes
+    # https://127.0.0.1, which the mkcert-issued cert doesn't claim
+    # (it's signed for localhost / 127.0.0.1 from the host's perspective
+    # but the cert verifier inside the container has no view of the
+    # host's local CA trust). The probe is a liveness check, not a
+    # security boundary.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/url-shortener", "healthcheck", "--url=https://127.0.0.1:8443/healthz", "--insecure"]
       interval: 5s
       timeout: 3s
       retries: 10

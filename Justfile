@@ -106,6 +106,47 @@ run *ARGS:
 version:
     @go run ./cmd/url-shortener version 2>/dev/null || echo "Version (resolved): {{ VERSION }}"
 
+# Generate a host-trusted dev TLS cert + key into dev/certs/ via mkcert.
+# Both files are gitignored; every contributor regenerates locally.
+#
+# Prerequisites: mkcert (https://github.com/FiloSottile/mkcert).
+#   - Linux (apt-based): `sudo apt install -y libnss3-tools && \
+#     curl -L -o ~/.local/bin/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \
+#     chmod +x ~/.local/bin/mkcert`
+#   - macOS:             `brew install mkcert nss`
+#
+# `mkcert -install` is idempotent and only needs to run once per host
+# to add mkcert's local CA to the system + browser trust stores. The
+# cert is valid for localhost / 127.0.0.1 / ::1, which covers both the
+# `tls`-profile compose stack and a binary running directly on the host.
+[group("dev")]
+dev-certs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v mkcert >/dev/null 2>&1; then
+        echo 'mkcert not found on PATH; see the recipe doc-comment for install instructions.' >&2
+        exit 1
+    fi
+    mkcert -install >/dev/null
+    mkdir -p dev/certs
+    mkcert \
+        -cert-file dev/certs/cert.pem \
+        -key-file  dev/certs/key.pem \
+        localhost 127.0.0.1 ::1
+    # mkcert writes the key with 0600. The compose `tls` profile mounts
+    # dev/certs into a distroless container where the binary runs as
+    # UID 65532 (nonroot), so it can't read a host-uid-owned 0600 file.
+    # Relax to 0644 -- this is dev-only material, gitignored, never
+    # production.
+    chmod 0644 dev/certs/key.pem
+    echo
+    echo "Wrote dev/certs/cert.pem + dev/certs/key.pem (gitignored, 0644 for compose readability)."
+    echo "Use them via:"
+    echo "    URL_SHORTENER_TLS_CERT_FILE=dev/certs/cert.pem \\"
+    echo "    URL_SHORTENER_TLS_KEY_FILE=dev/certs/key.pem \\"
+    echo "    ./bin/url-shortener run"
+    echo "or with the compose 'tls' profile: docker compose --profile tls up"
+
 # --- test ---------------------------------------------------------------------
 
 # Run all unit tests with verbose output and per-package coverage.

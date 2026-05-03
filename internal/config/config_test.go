@@ -2,6 +2,8 @@ package config_test
 
 import (
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +83,7 @@ func TestLoad_EnvOverrides(t *testing.T) {
 		AutoMigrate: true,
 		CodeLength:  9,
 	}
-	if cfg != want {
+	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("cfg = %+v\nwant %+v", cfg, want)
 	}
 }
@@ -205,6 +207,141 @@ func TestRedacted_StripsPasswords(t *testing.T) {
 	if !strings.Contains(cfg.DatabaseURL, "secret") {
 		t.Error("Redacted() must not mutate the receiver")
 	}
+}
+
+func TestLoad_TLSAndTrustedProxiesEnvOverrides(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
+	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
+	// Files must exist for Validate's stat check to pass; create
+	// scratch files with arbitrary content (Validate doesn't try to
+	// parse the PEM, only Stat the path).
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(certPath, []byte("not a real cert"), 0o600); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte("not a real key"), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	t.Setenv("URL_SHORTENER_TLS_CERT_FILE", certPath)
+	t.Setenv("URL_SHORTENER_TLS_KEY_FILE", keyPath)
+	// Comma-separated CIDR list -- viper's default decode hooks split
+	// strings on commas when targeting a []string field.
+	t.Setenv("URL_SHORTENER_TRUSTED_PROXIES", "127.0.0.1/32,10.0.0.0/8")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+
+	if cfg.TLSCertFile != certPath {
+		t.Errorf("TLSCertFile = %q, want %q", cfg.TLSCertFile, certPath)
+	}
+	if cfg.TLSKeyFile != keyPath {
+		t.Errorf("TLSKeyFile = %q, want %q", cfg.TLSKeyFile, keyPath)
+	}
+	wantProxies := []string{"127.0.0.1/32", "10.0.0.0/8"}
+	if !reflect.DeepEqual(cfg.TrustedProxies, wantProxies) {
+		t.Errorf("TrustedProxies = %v, want %v", cfg.TrustedProxies, wantProxies)
+	}
+}
+
+func TestValidate_TLSAndTrustedProxies(t *testing.T) {
+	t.Parallel()
+
+	const (
+		redisURL    = "redis://localhost:6379/0"
+		databaseURL = "postgres://u:p@h:5432/db"
+	)
+	// realDir + realCert/realKey are paths that exist, used by the
+	// happy-path subtests. Each subtest gets its own t.TempDir to
+	// keep them parallel-safe.
+	base := func(t *testing.T) (config.Config, string, string) {
+		t.Helper()
+		dir := t.TempDir()
+		certPath := filepath.Join(dir, "cert.pem")
+		keyPath := filepath.Join(dir, "key.pem")
+		if err := os.WriteFile(certPath, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write cert: %v", err)
+		}
+		if err := os.WriteFile(keyPath, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write key: %v", err)
+		}
+		return config.Config{
+			Env: "prod", Addr: ":8080", BaseURL: "http://x",
+			LogLevel: "info", LogFormat: "json",
+			DatabaseURL: databaseURL, RedisURL: redisURL,
+		}, certPath, keyPath
+	}
+
+	t.Run("cert without key is rejected", func(t *testing.T) {
+		t.Parallel()
+		c, certPath, _ := base(t)
+		c.TLSCertFile = certPath
+		if err := c.Validate(); err == nil {
+			t.Error("Validate() returned nil; want error for unpaired cert")
+		}
+	})
+
+	t.Run("key without cert is rejected", func(t *testing.T) {
+		t.Parallel()
+		c, _, keyPath := base(t)
+		c.TLSKeyFile = keyPath
+		if err := c.Validate(); err == nil {
+			t.Error("Validate() returned nil; want error for unpaired key")
+		}
+	})
+
+	t.Run("missing cert file is rejected", func(t *testing.T) {
+		t.Parallel()
+		c, _, keyPath := base(t)
+		c.TLSCertFile = filepath.Join(t.TempDir(), "nope.pem")
+		c.TLSKeyFile = keyPath
+		if err := c.Validate(); err == nil {
+			t.Error("Validate() returned nil; want error for missing cert path")
+		}
+	})
+
+	t.Run("both files set and present passes", func(t *testing.T) {
+		t.Parallel()
+		c, certPath, keyPath := base(t)
+		c.TLSCertFile = certPath
+		c.TLSKeyFile = keyPath
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() = %v; want nil", err)
+		}
+	})
+
+	t.Run("invalid CIDR is rejected", func(t *testing.T) {
+		t.Parallel()
+		c, _, _ := base(t)
+		c.TrustedProxies = []string{"not-a-cidr"}
+		if err := c.Validate(); err == nil {
+			t.Error("Validate() returned nil; want error for bad CIDR")
+		}
+	})
+
+	t.Run("multiple valid CIDRs pass", func(t *testing.T) {
+		t.Parallel()
+		c, _, _ := base(t)
+		c.TrustedProxies = []string{"127.0.0.1/32", "10.0.0.0/8", "::1/128"}
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() = %v; want nil", err)
+		}
+	})
+
+	t.Run("empty entries are skipped", func(t *testing.T) {
+		t.Parallel()
+		c, _, _ := base(t)
+		// Stray comma in env var produces an empty entry; should not
+		// fail validation since the consumer ignores empties too.
+		c.TrustedProxies = []string{"127.0.0.1/32", ""}
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() = %v; want nil", err)
+		}
+	})
 }
 
 // clearEnv unsets every URL_SHORTENER_* env var for the duration of the test

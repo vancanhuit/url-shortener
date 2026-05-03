@@ -138,6 +138,9 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_DB_MAX_CONN_LIFETIME`   | _(pgx default: 1h)_             | Hard cap on a connection's age. Forces rotation through floating-IP failovers and clears DB-side connection-state drift. Accepts Go duration syntax (e.g. `30m`, `2h`). |
 | `URL_SHORTENER_DB_MAX_CONN_IDLE_TIME`  | _(pgx default: 30m)_            | How long a connection may sit unused before being closed. |
 | `URL_SHORTENER_DB_HEALTH_CHECK_PERIOD` | _(pgx default: 1m)_             | How often pgx scans the pool for stale connections. |
+| `URL_SHORTENER_TLS_CERT_FILE`  | _(empty)_                     | Path to a PEM-encoded server certificate. When set together with `URL_SHORTENER_TLS_KEY_FILE`, the server speaks HTTPS on `URL_SHORTENER_ADDR`; otherwise it stays on plain HTTP (the right choice when fronted by a TLS-terminating reverse proxy). Both must be set together -- one without the other is a startup error. See [Deployment](#deployment). |
+| `URL_SHORTENER_TLS_KEY_FILE`   | _(empty)_                     | Path to the PEM-encoded private key matching `URL_SHORTENER_TLS_CERT_FILE`. |
+| `URL_SHORTENER_TRUSTED_PROXIES` | _(empty)_                    | Comma-separated CIDR list (e.g. `127.0.0.1/32,10.0.0.0/8`). When a request's `RemoteAddr` falls inside one of these ranges the server walks `X-Forwarded-For` to find the original client IP; otherwise XFF is ignored. Empty leaves no proxy trust configured -- safe default for direct-to-internet deployments. See [Reverse-proxy deployment (Caddy)](#reverse-proxy-deployment-caddy). |
 
 Pool tunables are zero by default, in which case pgx's own defaults apply.
 Production deployments behind a fronting proxy (PgBouncer, RDS Proxy)
@@ -282,6 +285,110 @@ dependencies (`config.Validate` rejects an empty
 `URL_SHORTENER_DATABASE_URL` or `URL_SHORTENER_REDIS_URL` at startup).
 Each check has its own line in the JSON body so operators can see
 which dependency is unhappy.
+
+## Deployment
+
+The binary supports two TLS-aware deployment shapes: terminating TLS
+itself with a static cert + key, or speaking plain HTTP behind a
+TLS-terminating reverse proxy (Caddy, nginx, Traefik, ...). Pick one;
+they are mutually exclusive.
+
+### Direct TLS on the binary
+
+Set `URL_SHORTENER_TLS_CERT_FILE` and `URL_SHORTENER_TLS_KEY_FILE` to
+PEM-encoded paths. Both must be set together -- a half-configured
+pair is a startup error. The server then listens HTTPS on
+`URL_SHORTENER_ADDR` and does not bind a plain-HTTP redirect listener
+(callers are expected to use `https://` URLs); a connection to the
+HTTP scheme on the same port will fail at the TLS handshake. The
+underlying `crypto/tls` defaults apply (TLS 1.2 minimum, modern
+cipher suites, HTTP/2 enabled).
+
+For local development, the [`just dev-certs`](Justfile) recipe
+generates a host-trusted cert + key under `dev/certs/` (gitignored)
+via [mkcert](https://github.com/FiloSottile/mkcert). The first run
+also installs mkcert's root CA into the host trust stores so
+browsers and `curl` accept the cert without `-k`. Then either run
+the binary directly:
+
+```sh
+just dev-certs
+URL_SHORTENER_TLS_CERT_FILE=dev/certs/cert.pem \
+URL_SHORTENER_TLS_KEY_FILE=dev/certs/key.pem \
+URL_SHORTENER_ADDR=:8443 \
+URL_SHORTENER_BASE_URL=https://localhost:8443 \
+URL_SHORTENER_DATABASE_URL=postgres://... \
+URL_SHORTENER_REDIS_URL=redis://... \
+./bin/url-shortener run
+```
+
+or use the `tls` compose profile, which mounts `./dev/certs/` into a
+distroless container and exposes the app on `:8443`:
+
+```sh
+just dev-certs                                  # one-time per host
+docker compose --profile=tls up --wait -d
+curl https://localhost:8443/healthz             # {"status":"ok"}
+docker compose --profile=tls down -v
+```
+
+The `tls` profile shares the `db` and `redis` services with `dev` (it
+just swaps `server` for `server-tls`), so the two profiles must not
+run simultaneously -- they bind the same Postgres / Redis host ports.
+
+### Reverse-proxy deployment (Caddy)
+
+For production, the more common pattern is to terminate TLS on a
+reverse proxy and forward plain HTTP to the app on a private network.
+The proxy handles the certificate lifecycle (ACME, OCSP, renewal),
+the app stays focused on its own concerns, and the same image works
+behind any proxy choice.
+
+Two pieces are needed on the app side:
+
+1. Leave `URL_SHORTENER_TLS_CERT_FILE` / `URL_SHORTENER_TLS_KEY_FILE`
+   unset so the server stays on plain HTTP.
+2. Set `URL_SHORTENER_TRUSTED_PROXIES` to the CIDR(s) the proxy
+   reaches the app from. The server then walks `X-Forwarded-For`
+   from those peers to recover the real client IP (used by the
+   request log's `remote_ip` field and by `c.RealIP()` everywhere).
+   `X-Forwarded-For` from peers outside the list is ignored, which
+   prevents header spoofing from any client that can talk directly
+   to the app.
+
+Minimal Caddyfile mirroring the `dev` compose stack:
+
+```caddyfile
+example.com {
+    # Caddy obtains and renews the cert from Let's Encrypt
+    # automatically on the first request to :443.
+    reverse_proxy 127.0.0.1:8080 {
+        # Caddy adds X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
+        # to the upstream request by default; no extra header_up
+        # block is needed.
+    }
+}
+```
+
+App-side env to match (Caddy on the same host, talking to the app
+over the loopback interface):
+
+```sh
+URL_SHORTENER_ADDR=:8080
+URL_SHORTENER_BASE_URL=https://example.com
+URL_SHORTENER_TRUSTED_PROXIES=127.0.0.1/32,::1/128
+```
+
+If Caddy runs in a different container on a Docker bridge network,
+swap the loopback CIDR for the bridge subnet (e.g.
+`172.16.0.0/12,127.0.0.1/32` covers the default Docker IP ranges).
+For Kubernetes, set it to the cluster's pod-CIDR plus the node-CIDR
+the ingress controller forwards from.
+
+The same shape works for nginx (`proxy_set_header X-Forwarded-For
+$proxy_add_x_forwarded_for;`) and Traefik (XFF set automatically).
+What matters on the app side is the `URL_SHORTENER_TRUSTED_PROXIES`
+list -- the proxy choice is otherwise opaque.
 
 ## Layout (target)
 
