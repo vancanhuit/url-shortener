@@ -391,6 +391,163 @@ Pull-request OCI tarballs (`oci-image-pr-<N>`) carry the same
 attestations, so reviewers can run the same commands against a
 loaded image.
 
+## Branch protection
+
+Branch-protection rules for `main` live in
+[`.github/rulesets/main.json`](.github/rulesets/main.json) as a native
+GitHub repository ruleset. The
+[`sync-rulesets`](.github/workflows/sync-rulesets.yaml) workflow
+applies it via `gh api` on every push that touches the JSON, so
+the file in the repo is the single source of truth. Drift introduced
+through the GitHub UI is reverted on the next sync run.
+
+The active ruleset enforces, on `main` only:
+
+- **Pull-request only** &mdash; no direct pushes (review count is 0;
+  the gate is the PR, not an approver)
+- **Required CI checks** &mdash; `commitlint`, `go (build / test / lint)`,
+  `govulncheck`, `trivy (image scan)`, `go (integration)`,
+  `compose smoke test`, `binaries`, `docker image`, `analyze (go)`.
+  PR branches must be up-to-date with `main` before merging.
+- **Linear history** &mdash; squash- or rebase-merge only, no merge
+  commits
+- **Signed commits** &mdash; every commit must carry a verified GPG /
+  SSH / S/MIME signature (see [Setting up signed commits](#setting-up-signed-commits)
+  below); configure a signing key on your GitHub account before
+  opening a PR
+- **Block force-push and deletion** of `main`
+- **Resolve all PR conversations** before merging
+
+### One-time setup
+
+The workflow needs a token with `Administration: write` on this repo;
+the default `GITHUB_TOKEN` deliberately lacks that scope. Steps for
+a repo admin:
+
+1. Create a fine-grained PAT scoped to `vancanhuit/url-shortener`
+   with `Repository permissions > Administration: Read and write`.
+2. Store it as the `RULESETS_TOKEN` repository secret.
+3. Trigger the `sync rulesets` workflow once via "Run workflow" so
+   the initial ruleset is applied. After that it runs automatically
+   whenever anything under `.github/rulesets/` changes on `main`.
+
+### Verifying current state
+
+```sh
+# List all active rulesets on the repo:
+gh api /repos/vancanhuit/url-shortener/rulesets
+
+# Inspect the live `main-branch-protection` ruleset and diff it
+# against the committed JSON:
+gh api "/repos/vancanhuit/url-shortener/rulesets/$(\
+    gh api /repos/vancanhuit/url-shortener/rulesets \
+        --jq '.[] | select(.name=="main-branch-protection") | .id')" \
+    | diff -u .github/rulesets/main.json -
+```
+
+A non-empty diff means someone changed the ruleset through the UI;
+either re-run the `sync rulesets` workflow (to revert) or update the
+JSON in a PR (to adopt the change).
+
+### Setting up signed commits
+
+The ruleset rejects unsigned commits on `main`, so every PR must be
+signed before it can merge. GPG, SSH, and S/MIME signatures all
+satisfy GitHub's verification check; the snippets below cover GPG on
+Linux because that's what this repo's maintainer uses. For other
+platforms or methods see GitHub's docs on
+[signing commits](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
+
+> **Note:** the email on your GPG UID must match a verified email on
+> your GitHub account, otherwise the signature is mathematically
+> valid but GitHub still shows _Unverified_. Check your verified
+> emails at [Settings -> Emails](https://github.com/settings/emails).
+
+#### One-time key setup
+
+```sh
+# 1. Generate an ed25519 signing key (prompts for a passphrase;
+#    `gpg-agent` caches it for the rest of the session).
+gpg --quick-generate-key "$(git config --global user.name) <$(git config --global user.email)>" \
+    ed25519 sign 2y
+
+# 2. Configure git to sign every commit / tag / rebase output.
+KEY_ID=$(gpg --list-secret-keys --keyid-format=long --with-colons "$(git config --global user.email)" \
+            | awk -F: '/^sec/ { print $5; exit }')
+git config --global gpg.format openpgp
+git config --global user.signingkey "$KEY_ID"
+git config --global commit.gpgsign true
+git config --global tag.gpgsign true
+git config --global rebase.gpgsign true
+
+# 3. Make sure pinentry can prompt on the current TTY.
+grep -q 'GPG_TTY' ~/.zshrc 2>/dev/null \
+    || echo 'export GPG_TTY=$(tty)' >> ~/.zshrc
+export GPG_TTY=$(tty)
+
+# 4. Print the armored public key and paste it into
+#    https://github.com/settings/gpg/new
+gpg --armor --export "$KEY_ID"
+```
+
+Verify a fresh commit shows up as **Verified** on the GitHub UI
+before merging anything that's gated by the ruleset:
+
+```sh
+git checkout -b test/gpg-signing-sanity
+git commit --allow-empty -m "chore: gpg signing sanity check"
+git log --show-signature -1   # should print "Good signature from ..."
+git push -u origin test/gpg-signing-sanity
+gh pr view --web              # the commit must show "Verified"
+gh pr close --delete-branch
+```
+
+#### Re-signing existing commits
+
+If a PR branch was opened before signing was set up, the existing
+commits are unsigned and the merge will be rejected. Re-sign in
+place and force-push:
+
+```sh
+# Single-commit branch -- amend, then force-push.
+git commit --amend --no-edit -S
+git push --force-with-lease
+
+# Multi-commit branch -- rebase --exec re-creates each commit signed.
+# (`rebase.gpgsign=true` from the setup above also signs commits
+# created by a plain `git rebase main`, but --exec is explicit.)
+git rebase --exec 'git commit --amend --no-edit -S' main
+git push --force-with-lease
+```
+
+#### Common Linux gotchas
+
+- **`error: gpg failed to sign the data ... Inappropriate ioctl for device`**
+  &mdash; `GPG_TTY` is unset in the current shell. Re-run
+  `export GPG_TTY=$(tty)`; the snippet above also persists it.
+- **Passphrase prompt on every commit** &mdash; `gpg-agent`'s default
+  cache TTL is short. Bump it in `~/.gnupg/gpg-agent.conf`:
+
+  ```
+  default-cache-ttl 28800
+  max-cache-ttl 86400
+  ```
+
+  Then `gpgconf --kill gpg-agent` so the next commit picks up the
+  new TTL.
+- **`gpg: Can't check signature: No public key` on older commits**
+  &mdash; harmless; those were signed by GitHub's web-flow key,
+  which is just not in your local keyring. Import it once if the
+  warning bothers you:
+
+  ```sh
+  curl -sS https://github.com/web-flow.gpg | gpg --import
+  ```
+
+- **Squash-merge** &mdash; the merge commit is signed by GitHub's
+  web-flow key, so `required_signatures` is satisfied even when
+  squashing. Squash-merge keeps working unchanged.
+
 ## License
 
 To be added.
