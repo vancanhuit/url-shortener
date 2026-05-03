@@ -7,7 +7,9 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -70,6 +72,25 @@ type Config struct {
 	DBMaxConnLifetime   time.Duration `mapstructure:"db_max_conn_lifetime"   json:"db_max_conn_lifetime"`
 	DBMaxConnIdleTime   time.Duration `mapstructure:"db_max_conn_idle_time"  json:"db_max_conn_idle_time"`
 	DBHealthCheckPeriod time.Duration `mapstructure:"db_health_check_period" json:"db_health_check_period"`
+
+	// TLSCertFile and TLSKeyFile, when both non-empty, switch the HTTP
+	// server to HTTPS on Addr using the PEM-encoded certificate and
+	// private key at the given paths. Both must be set together --
+	// Validate rejects half-configured pairs. Empty (the default) keeps
+	// the server on plain HTTP, which is the right choice when fronted
+	// by a TLS-terminating reverse proxy (Caddy/nginx/Traefik).
+	TLSCertFile string `mapstructure:"tls_cert_file" json:"tls_cert_file"`
+	TLSKeyFile  string `mapstructure:"tls_key_file"  json:"tls_key_file"`
+
+	// TrustedProxies is a comma-separated list of CIDR blocks (parsed by
+	// net.ParseCIDR) whose request peers are trusted to forward client
+	// IP addresses via X-Forwarded-For. When a request's RemoteAddr
+	// falls inside one of these ranges, the server walks XFF to find
+	// the original client IP; otherwise XFF is ignored and RemoteAddr
+	// stands. Empty (the default) leaves Echo's IPExtractor unset --
+	// equivalent to "no proxy in front". Set this to e.g.
+	// `127.0.0.1/32,10.0.0.0/8` when running behind a reverse proxy.
+	TrustedProxies []string `mapstructure:"trusted_proxies" json:"trusted_proxies"`
 }
 
 // Load reads the configuration from environment variables and applies the
@@ -89,6 +110,7 @@ func Load() (Config, error) {
 		"db_max_conns", "db_min_conns",
 		"db_max_conn_lifetime", "db_max_conn_idle_time",
 		"db_health_check_period",
+		"tls_cert_file", "tls_key_file", "trusted_proxies",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -183,6 +205,39 @@ func (c Config) Validate() error {
 	if c.DBHealthCheckPeriod < 0 {
 		return fmt.Errorf("config: db_health_check_period must be >= 0")
 	}
+
+	// TLS cert + key are paired -- one without the other is almost
+	// always a misconfiguration (e.g. a Helm values typo) and we'd
+	// rather refuse to start than silently fall back to plain HTTP
+	// when the operator thought TLS was on.
+	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
+		return fmt.Errorf("config: tls_cert_file and tls_key_file must be set together")
+	}
+	if c.TLSCertFile != "" {
+		// Stat both files at startup so missing-file errors surface as
+		// a config validation failure (clear stderr line, exit 1)
+		// rather than as the first request hitting a nil TLS config
+		// many seconds into the run.
+		if _, err := os.Stat(c.TLSCertFile); err != nil {
+			return fmt.Errorf("config: tls_cert_file: %w", err)
+		}
+		if _, err := os.Stat(c.TLSKeyFile); err != nil {
+			return fmt.Errorf("config: tls_key_file: %w", err)
+		}
+	}
+
+	// Each TrustedProxies entry must be a valid CIDR. Empty strings
+	// (which can sneak in via stray commas like "127.0.0.1/32,") are
+	// silently skipped on the consuming side, so don't error here.
+	for _, cidr := range c.TrustedProxies {
+		if cidr == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("config: trusted_proxies entry %q: %w", cidr, err)
+		}
+	}
+
 	return nil
 }
 

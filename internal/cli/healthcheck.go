@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"time"
@@ -16,10 +17,16 @@ import (
 //
 //	healthcheck:
 //	  test: ["CMD", "/usr/local/bin/url-shortener", "healthcheck"]
+//
+// For TLS-fronted services (the `tls` compose profile), pass
+// `--url=https://127.0.0.1:8443/healthz --insecure` so the probe
+// skips cert verification -- the certificate is intended for the
+// outside world, not the in-container loopback hop.
 func newHealthcheckCmd() *cobra.Command {
 	var (
-		url     string
-		timeout time.Duration
+		url      string
+		timeout  time.Duration
+		insecure bool
 	)
 	cmd := &cobra.Command{
 		Use:   "healthcheck",
@@ -32,7 +39,20 @@ func newHealthcheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := http.DefaultClient.Do(req)
+			client := http.DefaultClient
+			if insecure {
+				// New client per call so we don't mutate
+				// http.DefaultTransport. The probe is short-lived
+				// and runs once per healthcheck invocation, so the
+				// allocation cost is irrelevant.
+				client = &http.Client{
+					Transport: &http.Transport{
+						TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // intentional for in-container loopback probe
+					},
+					Timeout: timeout,
+				}
+			}
+			resp, err := client.Do(req)
 			if err != nil {
 				return err
 			}
@@ -46,5 +66,6 @@ func newHealthcheckCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&url, "url", "http://127.0.0.1:8080/healthz", "URL to probe")
 	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Second, "request timeout")
+	cmd.Flags().BoolVar(&insecure, "insecure", false, "skip TLS certificate verification (use with https:// URLs in compose healthchecks)")
 	return cmd
 }
