@@ -251,6 +251,89 @@ trivy-image: docker-build
 tidy:
     go mod tidy
 
+# Smoke-check a running url-shortener stack: hit the operational endpoints
+# (`/healthz`, `/readyz`, `/version`), the embedded static assets, and a
+# real shorten -> fetch -> redirect cycle. The same script CI's
+# `compose-smoke` job runs against the `dev` compose profile after
+# `docker compose --profile=dev up --wait`, factored out here so a dev
+# can iterate on it locally without round-tripping through GitHub.
+#
+# Lifecycle stays with the caller: this recipe never starts or stops the
+# stack, so re-running it is cheap and never disturbs a long-lived dev
+# environment. Bring up the stack first; tear down when you're done:
+#
+#   docker compose --profile=dev up --wait -d
+#   just compose-smoke
+#   docker compose --profile=dev down -v
+#
+# `BASE_URL` defaults to the dev profile's published port; override for
+# alternate setups (e.g. a port-forwarded staging server). Requires curl
+# and jq on PATH; both ship preinstalled on the GitHub-hosted runners.
+[group("test")]
+compose-smoke BASE_URL="http://localhost:8080":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base={{ quote(BASE_URL) }}
+
+    echo "== /healthz =="
+    curl --fail-with-body -sS "$base/healthz" \
+        | tee /dev/stderr | jq -e '.status == "ok"' >/dev/null
+
+    echo "== /readyz =="
+    curl --fail-with-body -sS "$base/readyz" \
+        | tee /dev/stderr \
+        | jq -e '.status == "ok" and .postgres == "ok" and .redis == "ok"' >/dev/null
+
+    echo "== /version =="
+    curl --fail-with-body -sS "$base/version" \
+        | tee /dev/stderr | jq -e 'has("version")' >/dev/null
+
+    # The HTML index references the embedded assets; a missing template
+    # parse would 5xx here long before we get a chance to look at the body.
+    echo "== / (web index) =="
+    body=$(curl --fail-with-body -sS "$base/")
+    # Match the rendered <title> rather than the package name -- the
+    # template's app title is "URL Shortener" (with a space), and
+    # this assertion proves the layout actually rendered rather than
+    # serving a stub or a 5xx.
+    echo "$body" | grep -qi "<title>URL Shortener</title>" \
+        || { echo "index page missing <title>URL Shortener</title>"; exit 1; }
+
+    # The web-builder Dockerfile stage emits styles.css / htmx.min.js /
+    # theme.js / copy.js into web/static/, then //go:embed bundles them
+    # into the binary. If any of these 404 the embed list and the
+    # Dockerfile have drifted apart -- the Go binary would still build
+    # clean, which is exactly the regression class this check catches.
+    echo "== embedded static assets =="
+    for asset in styles.css htmx.min.js theme.js copy.js; do
+        curl --fail-with-body -sS -o /dev/null "$base/static/$asset"
+    done
+
+    echo "== shorten -> fetch -> redirect =="
+    target="https://example.com/smoke/$(date +%s)"
+    code=$(curl --fail-with-body -sS -X POST "$base/api/v1/links" \
+        -H "content-type: application/json" \
+        -d "{\"target_url\":\"$target\"}" | jq -r .code)
+    test -n "$code" && test "$code" != null \
+        || { echo "create returned no code"; exit 1; }
+
+    # Round-trip the link via the JSON API.
+    curl --fail-with-body -sS "$base/api/v1/links/$code" \
+        | jq -e --arg t "$target" '.target_url == $t' >/dev/null
+
+    # Public redirect: expect 302 + Location header. -D - dumps response
+    # headers; -o /dev/null discards the body. We explicitly do not
+    # follow the redirect (no -L) so the status line we inspect is the
+    # redirect itself.
+    headers=$(curl -sS -D - -o /dev/null "$base/r/$code")
+    echo "$headers"
+    echo "$headers" | grep -qiE "^HTTP/[0-9.]+ 302" \
+        || { echo "expected 302"; exit 1; }
+    echo "$headers" | grep -qi "^location: $target" \
+        || { echo "expected Location: $target"; exit 1; }
+
+    echo "ok"
+
 # --- release ------------------------------------------------------------------
 
 # Lint just the most recent commit message.

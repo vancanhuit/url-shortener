@@ -77,17 +77,22 @@ just test                              # run unit tests with -race -v -cover
 just test-integration                  # bring up test-profile infra, migrate, run -tags=integration tests
 just lint                              # run golangci-lint (auto-installs the pinned version)
 just govulncheck                       # run govulncheck against the latest Go vuln database
-just trivy-image                       # build the Docker image and scan it with Trivy (HIGH/CRITICAL)
-docker compose up --wait -d            # bring up the full local dev stack (db + redis + server on 5432/6379/8080)
-docker compose down -v                 # tear down the dev stack
-docker compose --profile=test down -v  # tear down the test-profile stack (db-test + redis-test on 5433/6380)
+just trivy-image                              # build the Docker image and scan it with Trivy (HIGH/CRITICAL)
+docker compose --profile=dev up --wait -d     # bring up the full local dev stack (db + redis + server on 5432/6379/8080)
+just compose-smoke                            # smoke-check a running stack: operational endpoints + shorten/redirect cycle
+docker compose --profile=dev down -v          # tear down the dev stack
+docker compose --profile=test down -v         # tear down the test-profile stack (db-test + redis-test on 5433/6380)
 ```
 
-The `compose.yaml` defines two stacks side by side: the **default** services
-(`db`, `redis`, `server`) for local dev on standard ports, and a **`test`
+The `compose.yaml` defines two stacks side by side: the **`dev` profile**
+(`db`, `redis`, `server`) for local dev on standard ports, and the **`test`
 profile** (`db-test`, `redis-test`) on alternate ports (5433, 6380) with
-their own volumes. Running the integration suite while a dev stack is up
-is therefore safe; the two never collide.
+their own volumes. Both profiles must be selected explicitly with
+`--profile=...` -- a bare `docker compose up` starts nothing. Running the
+integration suite while a dev stack is up is therefore safe; the two
+never collide. The CI `compose-smoke` job drives the `dev` profile end
+to end on every PR, so anything that breaks `up --wait` locally also
+breaks CI.
 
 The HTML UI is embedded in the binary via `//go:embed`, so the compiled
 assets in `web/static/` must exist at `go build` time. They're treated as
