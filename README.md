@@ -393,15 +393,18 @@ loaded image.
 
 ## Branch protection
 
-Branch-protection rules for `main` live in
-[`.github/rulesets/main.json`](.github/rulesets/main.json) as a native
-GitHub repository ruleset. The
+Branch- and tag-protection rules live in
+[`.github/rulesets/`](.github/rulesets/) as native GitHub repository
+rulesets, one JSON file per ruleset. The
 [`sync-rulesets`](.github/workflows/sync-rulesets.yaml) workflow
-applies it via `gh api` on every push that touches the JSON, so
-the file in the repo is the single source of truth. Drift introduced
-through the GitHub UI is reverted on the next sync run.
+walks every file in that directory and applies it via `gh api` on
+every push that touches the JSON, so the files in the repo are the
+single source of truth. Drift introduced through the GitHub UI is
+reverted on the next sync run.
 
-The active ruleset enforces, on `main` only:
+### `main.json` (target: branch)
+
+Applies to the default branch (`~DEFAULT_BRANCH`) and enforces:
 
 - **Pull-request only** &mdash; no direct pushes (review count is 0;
   the gate is the PR, not an approver)
@@ -409,14 +412,29 @@ The active ruleset enforces, on `main` only:
   `govulncheck`, `trivy (image scan)`, `go (integration)`,
   `compose smoke test`, `binaries`, `docker image`, `analyze (go)`.
   PR branches must be up-to-date with `main` before merging.
-- **Linear history** &mdash; squash- or rebase-merge only, no merge
-  commits
+- **Linear history** &mdash; the merge UI only offers _Squash and
+  merge_ and _Rebase and merge_ (`allowed_merge_methods` on the
+  `pull_request` rule); plain merge commits would also be rejected
+  by `required_linear_history`
 - **Signed commits** &mdash; every commit must carry a verified GPG /
   SSH / S/MIME signature (see [Setting up signed commits](#setting-up-signed-commits)
   below); configure a signing key on your GitHub account before
   opening a PR
 - **Block force-push and deletion** of `main`
 - **Resolve all PR conversations** before merging
+
+### `semver-tag.json` (target: tag)
+
+Applies to every tag matching `refs/tags/v*` (i.e. semver release tags
+created by the `release.yaml` workflow) and enforces:
+
+- **Block deletion** &mdash; published releases are immutable;
+  `git push --delete origin v1.2.3` is rejected
+- **Block force-push** (`non_fast_forward`) &mdash; an existing tag
+  cannot be re-pointed at a different commit
+- **Linear history** &mdash; included for parity with the manually
+  configured ruleset this replaced; on tags it has no behavioural
+  effect since tags don't have history of their own
 
 ### One-time setup
 
@@ -437,12 +455,17 @@ a repo admin:
 # List all active rulesets on the repo:
 gh api /repos/vancanhuit/url-shortener/rulesets
 
-# Inspect the live `main-branch-protection` ruleset and diff it
-# against the committed JSON:
+# Inspect the live `main` ruleset and diff it against the committed JSON.
+# `jq -S` normalizes object-key order on both sides; the JSON is also
+# crafted to round-trip the API's server-side defaults (e.g. the
+# `pull_request` rule's `required_reviewers: []`), so a clean apply
+# produces an empty diff.
 gh api "/repos/vancanhuit/url-shortener/rulesets/$(\
     gh api /repos/vancanhuit/url-shortener/rulesets \
-        --jq '.[] | select(.name=="main-branch-protection") | .id')" \
-    | diff -u .github/rulesets/main.json -
+        --jq '.[] | select(.name=="main") | .id')" \
+    | jq -S '{name, target, enforcement, conditions, bypass_actors, rules}' \
+    | diff -u <(jq -S '{name, target, enforcement, conditions, bypass_actors, rules}' \
+                   .github/rulesets/main.json) -
 ```
 
 A non-empty diff means someone changed the ruleset through the UI;
