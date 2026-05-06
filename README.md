@@ -184,21 +184,32 @@ means "never expires". `click_count` is the lifetime hit count for
 the redirect endpoint, bumped fire-and-forget on each successful
 `/r/:code` so it never delays the 302.
 
-| Endpoint                  | Purpose                                                              |
-| ------------------------- | -------------------------------------------------------------------- |
-| `POST /api/v1/links`      | Create a link. Auto-generates a base62 code, or accepts a user one.  |
-| `GET  /api/v1/links/:code`| Fetch link metadata as JSON.                                         |
-| `GET  /r/:code`           | 302 redirect to the link's `target_url`. Read-through Redis cache.   |
+| Endpoint                    | Purpose                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `POST   /api/v1/links`      | Create a link. Auto-generates a base62 code, or accepts a user one.                      |
+| `GET    /api/v1/links/:code`| Fetch link metadata as JSON.                                                             |
+| `DELETE /api/v1/links/:code`| Soft-delete a link. Returns `204` on success, `404` thereafter; no body. See below.      |
+| `GET    /r/:code`           | 302 redirect to the link's `target_url`. Read-through Redis cache.                       |
 
 Validation: `target_url` must be `http`/`https`, have a host, and be at most
 2048 characters. User-supplied codes must match `[0-9A-Za-z]{4,64}`.
 `expires_at`, when supplied, must be in the future (a 30s grace window
 absorbs honest client/server clock skew). Status codes: `400` for
 malformed JSON, `409` for a duplicate user-supplied code, `422` for
-validation failures, `404` for unknown codes, `410 Gone` for an
-expired code (returned by both `GET /api/v1/links/:code` and
-`GET /r/:code` -- distinct from `404` so clients can tell a once-valid
-code from one that never existed).
+validation failures, `404` for unknown codes, `410 Gone` for a
+retired code (expired *or* soft-deleted; returned by both
+`GET /api/v1/links/:code` and `GET /r/:code` -- distinct from `404`
+so clients can tell a once-valid code from one that never existed).
+
+Soft-delete (`DELETE /api/v1/links/:code`) flips an internal
+`deleted_at` tombstone; the row stays in Postgres so audit columns
+(`created_at`, `click_count`, ...) survive. Subsequent
+`GET /r/:code` returns `410 Gone`, the cache entry is invalidated
+server-side, and the recent-links feed and dedup lookup both stop
+seeing the row. The first DELETE returns `204 No Content`; a second
+DELETE against the same code returns `404 not_found` -- the API is
+semantically idempotent (the row stays deleted) but distinguishes
+the two responses, mirroring how most REST APIs handle DELETE.
 
 Error responses carry a stable `code` field alongside the
 human-readable `error` so clients can branch on the failure without
@@ -215,6 +226,7 @@ parsing the message:
 | 409  | `code_taken`        | The user-supplied short code is already in use.           |
 | 404  | `not_found`         | The code does not exist (either malformed or unknown).    |
 | 410  | `link_expired`      | The link existed but its `expires_at` has passed.         |
+| 410  | `link_deleted`      | The link existed but was soft-deleted via `DELETE`.       |
 | 500  | `internal_error`    | Any other server-side failure; details are logged only.   |
 
 The string values are part of the public API contract and will not

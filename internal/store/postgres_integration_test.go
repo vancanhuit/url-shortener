@@ -276,3 +276,78 @@ func TestTransaction_RollbackDiscardsInsert(t *testing.T) {
 		t.Errorf("after rollback, err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestSoftDeleteLink_StampsTombstoneAndExcludesFromListAndDedup
+// exercises the full SQL-level soft-delete contract:
+//
+//  1. The first SoftDeleteLink call returns nil and stamps deleted_at.
+//  2. GetLinkByCode still returns the row (so handlers can surface 410)
+//     but Link.IsDeleted() is true.
+//  3. ListLinks no longer includes the row (WHERE deleted_at IS NULL).
+//  4. GetLinkByTargetURL no longer matches the row, so dedup mints a
+//     fresh code rather than resurrecting a retired one.
+//  5. A second SoftDeleteLink call against the same code returns
+//     ErrNotFound, matching the handler-layer behavior of "204 then 404".
+func TestSoftDeleteLink_StampsTombstoneAndExcludesFromListAndDedup(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+	code := uniqueCode(t)
+	target := "https://example.com/softdel/" + code
+
+	if _, err := s.CreateLink(ctx, nil, code, target, nil); err != nil {
+		t.Fatalf("CreateLink: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, code)
+	})
+
+	if err := s.SoftDeleteLink(ctx, nil, code); err != nil {
+		t.Fatalf("first SoftDeleteLink: %v", err)
+	}
+
+	// 1+2: the row survives but is now tombstoned.
+	got, err := s.GetLinkByCode(ctx, nil, code)
+	if err != nil {
+		t.Fatalf("GetLinkByCode after soft-delete: %v", err)
+	}
+	if !got.IsDeleted() {
+		t.Errorf("IsDeleted = false, want true (DeletedAt = %v)", got.DeletedAt)
+	}
+
+	// 3: ListLinks filters deleted rows out. Use a wide limit + the
+	// just-inserted ID as an upper bound so the assertion is robust
+	// against unrelated concurrent test rows.
+	rows, err := s.ListLinks(ctx, nil, 100, got.ID+1)
+	if err != nil {
+		t.Fatalf("ListLinks: %v", err)
+	}
+	for _, l := range rows {
+		if l.Code == code {
+			t.Errorf("ListLinks returned the soft-deleted row (code=%q)", code)
+		}
+	}
+
+	// 4: dedup must not resurrect the deleted row.
+	if _, err := s.GetLinkByTargetURL(ctx, nil, target); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetLinkByTargetURL after soft-delete: err = %v, want ErrNotFound", err)
+	}
+
+	// 5: idempotency boundary -- second delete is a no-op that
+	// surfaces ErrNotFound, mirroring the API's 204-then-404 shape.
+	if err := s.SoftDeleteLink(ctx, nil, code); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("second SoftDeleteLink: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestSoftDeleteLink_UnknownCodeReturnsErrNotFound covers the
+// "never-existed" case as a separate path from the "already deleted"
+// case in the test above; together they cover both branches of the
+// "WHERE code = $1 AND deleted_at IS NULL" UPDATE returning 0 rows.
+func TestSoftDeleteLink_UnknownCodeReturnsErrNotFound(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+
+	if err := s.SoftDeleteLink(ctx, nil, uniqueCode(t)); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}

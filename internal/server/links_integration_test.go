@@ -202,6 +202,116 @@ func TestLinksAPI_CreateGetRedirectFlow(t *testing.T) {
 	}
 }
 
+// TestLinksAPI_DeleteFlow walks the soft-delete lifecycle through the
+// real HTTP server, real Postgres, real Redis -- the same wires the
+// production stack uses. The flow is:
+//
+//  1. POST creates a link, populating the cache via the create path.
+//  2. /r/:code redirects (302) and lands a cached entry.
+//  3. DELETE returns 204; the cache is invalidated server-side.
+//  4. /r/:code now returns 410 (cache miss + tombstoned row).
+//  5. /api/v1/links/:code returns 410 with `code=link_deleted`,
+//     letting programmatic clients distinguish a retired link from
+//     an unknown one.
+//  6. A second DELETE returns 404 -- documents the API's
+//     semantically-idempotent-but-response-distinct behavior.
+//
+// No unit-test seam exercises the cache-invalidation path against a
+// real Redis, so this test is the safety net for that interaction.
+func TestLinksAPI_DeleteFlow(t *testing.T) {
+	base, stop := startFullServer(t)
+	defer stop()
+
+	// 1. Create.
+	target := "https://example.com/integration/delete/" + randomSuffix(t)
+	body, _ := json.Marshal(map[string]string{"target_url": target})
+	req, _ := http.NewRequestWithContext(t.Context(),
+		http.MethodPost, base+"/api/v1/links", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status = %d", resp.StatusCode)
+	}
+	var created struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// 2. Warm the cache via /r so step 4 must observe an explicit
+	// invalidation rather than a serendipitous miss.
+	rreq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/r/"+created.Code, nil)
+	rresp, err := httpClientNoRedirect.Do(rreq)
+	if err != nil {
+		t.Fatalf("warmup redirect: %v", err)
+	}
+	_ = rresp.Body.Close()
+	if rresp.StatusCode != http.StatusFound {
+		t.Fatalf("warmup redirect status = %d", rresp.StatusCode)
+	}
+
+	// 3. DELETE.
+	dreq, _ := http.NewRequestWithContext(t.Context(),
+		http.MethodDelete, base+"/api/v1/links/"+created.Code, nil)
+	dresp, err := http.DefaultClient.Do(dreq)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	_ = dresp.Body.Close()
+	if dresp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204", dresp.StatusCode)
+	}
+
+	// 4. /r/:code -> 410 (cache invalidation + tombstoned row).
+	rreq, _ = http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/r/"+created.Code, nil)
+	rresp, err = httpClientNoRedirect.Do(rreq)
+	if err != nil {
+		t.Fatalf("post-delete redirect: %v", err)
+	}
+	_ = rresp.Body.Close()
+	if rresp.StatusCode != http.StatusGone {
+		t.Errorf("redirect status = %d, want 410", rresp.StatusCode)
+	}
+
+	// 5. /api/v1/links/:code -> 410 + link_deleted.
+	gresp, err := http.Get(base + "/api/v1/links/" + created.Code)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = gresp.Body.Close() }()
+	if gresp.StatusCode != http.StatusGone {
+		t.Errorf("GET status = %d, want 410", gresp.StatusCode)
+	}
+	var errBody struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(gresp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode err body: %v", err)
+	}
+	if errBody.Code != "link_deleted" {
+		t.Errorf("error code = %q, want link_deleted", errBody.Code)
+	}
+
+	// 6. Second DELETE -> 404 (semantically idempotent, response
+	//    distinct: see Delete handler doc-comment).
+	dreq, _ = http.NewRequestWithContext(t.Context(),
+		http.MethodDelete, base+"/api/v1/links/"+created.Code, nil)
+	dresp, err = http.DefaultClient.Do(dreq)
+	if err != nil {
+		t.Fatalf("second DELETE: %v", err)
+	}
+	_ = dresp.Body.Close()
+	if dresp.StatusCode != http.StatusNotFound {
+		t.Errorf("second DELETE status = %d, want 404", dresp.StatusCode)
+	}
+}
+
 func TestLinksAPI_UnknownCodeReturns404(t *testing.T) {
 	base, stop := startFullServer(t)
 	defer stop()
