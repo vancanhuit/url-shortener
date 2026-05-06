@@ -85,9 +85,10 @@ type DBTX interface {
 
 // Link is a row from the `links` table.
 //
-// ExpiresAt is nil when the link never expires; callers must use a
-// pointer rather than the zero time so "never" and "epoch" stay
-// distinguishable through encoding/json.
+// ExpiresAt and DeletedAt are nil for the common case (never expires,
+// not deleted). Callers must use pointers rather than the zero time
+// so "never set" stays distinguishable from "set to epoch" through
+// encoding/json and through Postgres NULL handling.
 type Link struct {
 	ID         int64
 	Code       string
@@ -95,12 +96,22 @@ type Link struct {
 	CreatedAt  time.Time
 	ClickCount int64
 	ExpiresAt  *time.Time
+	DeletedAt  *time.Time
 }
 
 // IsExpired reports whether the link has an expiry set and that expiry
 // is in the past. A nil ExpiresAt always returns false ("never expires").
 func (l Link) IsExpired() bool {
 	return l.ExpiresAt != nil && time.Now().After(*l.ExpiresAt)
+}
+
+// IsDeleted reports whether the link has been soft-deleted. A nil
+// DeletedAt always returns false ("not deleted"). The handler layer
+// uses this to surface 410 Gone for retired links the same way it
+// does for expired ones, while the dedup / list paths filter deleted
+// rows out at the SQL level.
+func (l Link) IsDeleted() bool {
+	return l.DeletedAt != nil
 }
 
 // Store is the entry point for all DB access. It owns a pgx pool which it
@@ -212,11 +223,11 @@ func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string,
 	const q = `
 		INSERT INTO links (code, target_url, expires_at)
 		VALUES ($1, $2, $3)
-		RETURNING id, code, target_url, created_at, click_count, expires_at
+		RETURNING id, code, target_url, created_at, click_count, expires_at, deleted_at
 	`
 	var l Link
 	err := db.QueryRow(ctx, q, code, targetURL, expiresAt).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt)
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -267,19 +278,25 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 		rows pgx.Rows
 		err  error
 	)
+	// Soft-deleted rows are filtered out of the recent list: a
+	// retired link has no business reappearing in the public feed,
+	// and the deleted_at IS NOT NULL partial index keeps the filter
+	// cheap regardless of the deleted-row volume.
 	if beforeID > 0 {
 		const q = `
-			SELECT id, code, target_url, created_at, click_count, expires_at
+			SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
 			FROM links
 			WHERE id < $1
+			  AND deleted_at IS NULL
 			ORDER BY id DESC
 			LIMIT $2
 		`
 		rows, err = db.Query(ctx, q, beforeID, limit)
 	} else {
 		const q = `
-			SELECT id, code, target_url, created_at, click_count, expires_at
+			SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
 			FROM links
+			WHERE deleted_at IS NULL
 			ORDER BY id DESC
 			LIMIT $1
 		`
@@ -293,7 +310,7 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 	out := make([]Link, 0, limit)
 	for rows.Next() {
 		var l Link
-		if err := rows.Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt); err != nil {
 			return nil, fmt.Errorf("store: list links: scan: %w", err)
 		}
 		out = append(out, l)
@@ -305,20 +322,21 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 }
 
 // GetLinkByCode looks up a link by its short code. Returns ErrNotFound when
-// the row is missing. Expired rows are still returned so callers can
-// distinguish 410 from 404 themselves; check Link.IsExpired.
+// the row is missing. Expired and soft-deleted rows are still returned
+// so callers can distinguish 410 from 404 themselves; check
+// Link.IsExpired and Link.IsDeleted.
 func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, error) {
 	if db == nil {
 		db = s.pool
 	}
 	const q = `
-		SELECT id, code, target_url, created_at, click_count, expires_at
+		SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
 		FROM links
 		WHERE code = $1
 	`
 	var l Link
 	err := db.QueryRow(ctx, q, code).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt)
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Link{}, ErrNotFound
@@ -328,18 +346,21 @@ func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, 
 	return l, nil
 }
 
-// GetLinkByTargetURL returns the oldest non-expired permanent link with
-// the exact target_url. Used by the API to dedupe auto-generated codes
-// -- if the caller is shortening a URL that's already in the table,
-// return its existing code instead of minting a new one.
+// GetLinkByTargetURL returns the oldest non-expired, non-deleted
+// permanent link with the exact target_url. Used by the API to dedupe
+// auto-generated codes -- if the caller is shortening a URL that's
+// already in the table, return its existing code instead of minting a
+// new one.
 //
 // Rows that have an expiry set (whether or not yet past) are excluded
 // so dedup never reuses an ephemeral link as if it were permanent;
 // callers asking for an expiring code already opt out of dedup at the
-// handler layer. Multiple permanent rows can legally share a target
-// (a user-supplied code is allowed even when an auto-generated row
-// already covers the same target), so we deliberately pick the oldest
-// by id ASC for stable behavior.
+// handler layer. Soft-deleted rows are likewise excluded -- a retired
+// link must never be silently re-served as a dedup hit. Multiple
+// permanent rows can legally share a target (a user-supplied code is
+// allowed even when an auto-generated row already covers the same
+// target), so we deliberately pick the oldest by id ASC for stable
+// behavior.
 //
 // Returns ErrNotFound when no row matches.
 func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL string) (Link, error) {
@@ -347,16 +368,17 @@ func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL strin
 		db = s.pool
 	}
 	const q = `
-		SELECT id, code, target_url, created_at, click_count, expires_at
+		SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
 		FROM links
 		WHERE target_url = $1
 		  AND expires_at IS NULL
+		  AND deleted_at IS NULL
 		ORDER BY id ASC
 		LIMIT 1
 	`
 	var l Link
 	err := db.QueryRow(ctx, q, targetURL).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt)
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Link{}, ErrNotFound
@@ -364,4 +386,36 @@ func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL strin
 		return Link{}, fmt.Errorf("store: get link by target url: %w", err)
 	}
 	return l, nil
+}
+
+// SoftDeleteLink marks the link with the given code as deleted by
+// stamping deleted_at = now(). It is idempotent in semantic only:
+// the first call returns nil, subsequent calls (or a call against a
+// non-existent code) return ErrNotFound, since the WHERE clause is
+// scoped to live rows so the affected-row count tells the caller
+// whether anything actually changed. Higher layers translate
+// ErrNotFound to 404 the same way they do for GetLinkByCode.
+//
+// The row is left in the table -- expires_at, click_count, and
+// every audit column survive the delete -- so a future undelete
+// recipe could clear deleted_at and bring the link back if the
+// product ever needs it.
+func (s *Store) SoftDeleteLink(ctx context.Context, db DBTX, code string) error {
+	if db == nil {
+		db = s.pool
+	}
+	const q = `
+		UPDATE links
+		SET deleted_at = now()
+		WHERE code = $1
+		  AND deleted_at IS NULL
+	`
+	tag, err := db.Exec(ctx, q, code)
+	if err != nil {
+		return fmt.Errorf("store: soft delete link: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

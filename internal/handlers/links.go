@@ -72,6 +72,7 @@ type LinkStore interface {
 	GetLinkByTargetURL(ctx context.Context, db store.DBTX, targetURL string) (store.Link, error)
 	ListLinks(ctx context.Context, db store.DBTX, limit int, beforeID int64) ([]store.Link, error)
 	IncrementClicks(ctx context.Context, db store.DBTX, code string) error
+	SoftDeleteLink(ctx context.Context, db store.DBTX, code string) error
 }
 
 // LinkCache is the cache surface the links handler depends on. It is
@@ -144,6 +145,7 @@ func NewLinks(cfg LinksConfig) *Links {
 func (h *Links) Mount(e *echo.Echo) {
 	e.POST("/api/v1/links", h.Create)
 	e.GET("/api/v1/links/:code", h.Get)
+	e.DELETE("/api/v1/links/:code", h.Delete)
 	e.GET("/r/:code", h.Redirect)
 }
 
@@ -190,6 +192,7 @@ const (
 	ErrCodeCodeTaken       = "code_taken"        // 409 when a user-supplied short code is already in use.
 	ErrCodeNotFound        = "not_found"         // 404 when the requested code does not exist.
 	ErrCodeLinkExpired     = "link_expired"      // 410 when the link existed but has passed its expires_at.
+	ErrCodeLinkDeleted     = "link_deleted"      // 410 when the link existed but was soft-deleted via DELETE /api/v1/links/:code.
 	ErrCodeInternal        = "internal_error"    // 500 for any other failure.
 )
 
@@ -425,10 +428,51 @@ func (h *Links) Get(c *echo.Context) error {
 		h.logger.Error("links: get failed", "error", err, "code", code)
 		return c.JSON(http.StatusInternalServerError, errResp(ErrCodeInternal, "internal error"))
 	}
+	if link.IsDeleted() {
+		return c.JSON(http.StatusGone, errResp(ErrCodeLinkDeleted, "link has been deleted"))
+	}
 	if link.IsExpired() {
 		return c.JSON(http.StatusGone, errResp(ErrCodeLinkExpired, "link has expired"))
 	}
 	return c.JSON(http.StatusOK, h.makeResp(link))
+}
+
+// Delete implements DELETE /api/v1/links/:code. It performs a
+// soft-delete: the row stays in `links` with its audit columns
+// intact, but `deleted_at` is stamped so the redirect, lookup, list,
+// and dedup paths all stop seeing it. The cache entry is invalidated
+// best-effort so a subsequent /r/:code goes to the store and surfaces
+// a 410.
+//
+// Idempotency is semantic, not response-shape: the first DELETE
+// against a live code returns 204; a second DELETE against the same
+// (now-deleted) code returns 404, the same response the API gives
+// for any other unknown / unreachable code. Clients that need to
+// treat both first-and-second-DELETE as success can collapse 204 +
+// 404 themselves.
+func (h *Links) Delete(c *echo.Context) error {
+	code := c.Param("code")
+	if !shortener.ValidCode(code) {
+		return c.JSON(http.StatusNotFound, errResp(ErrCodeNotFound, "not found"))
+	}
+	ctx := c.Request().Context()
+	err := h.store.SoftDeleteLink(ctx, nil, code)
+	if errors.Is(err, store.ErrNotFound) {
+		return c.JSON(http.StatusNotFound, errResp(ErrCodeNotFound, "not found"))
+	}
+	if err != nil {
+		h.logger.Error("links: delete failed", "error", err, "code", code)
+		return c.JSON(http.StatusInternalServerError, errResp(ErrCodeInternal, "internal error"))
+	}
+	// Best-effort cache invalidation: a stale entry would only
+	// last `cacheTTL` anyway, but eagerly removing it makes the
+	// post-delete /r/:code 410 immediately rather than after the
+	// TTL elapses. Failures are logged and otherwise ignored --
+	// the soft-delete itself has already committed.
+	if err := h.cache.Del(ctx, cacheKey(code)); err != nil {
+		h.logger.Warn("links: cache del failed after delete", "error", err, "code", code)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // Redirect implements GET /r/:code. Tries the cache first, falls back
@@ -458,6 +502,9 @@ func (h *Links) Redirect(c *echo.Context) error {
 	if err != nil {
 		h.logger.Error("links: redirect lookup failed", "error", err, "code", code)
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
+	}
+	if link.IsDeleted() {
+		return echo.NewHTTPError(http.StatusGone, "link has been deleted")
 	}
 	if link.IsExpired() {
 		return echo.NewHTTPError(http.StatusGone, "link has expired")

@@ -123,8 +123,10 @@ func (f *fakeStore) GetLinkByTargetURL(_ context.Context, _ store.DBTX, targetUR
 
 // ListLinks returns the stored links sorted by id descending, mirroring
 // the production ordering. beforeID, when > 0, filters to ids < beforeID.
-// When failList is set, every call returns that error -- used to verify
-// graceful degradation when the database is unavailable.
+// Soft-deleted rows are excluded so the fake matches what the SQL
+// implementation does (`WHERE deleted_at IS NULL`). When failList is
+// set, every call returns that error -- used to verify graceful
+// degradation when the database is unavailable.
 func (f *fakeStore) ListLinks(_ context.Context, _ store.DBTX, limit int, beforeID int64) ([]store.Link, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -133,6 +135,9 @@ func (f *fakeStore) ListLinks(_ context.Context, _ store.DBTX, limit int, before
 	}
 	all := make([]store.Link, 0, len(f.links))
 	for _, l := range f.links {
+		if l.DeletedAt != nil {
+			continue
+		}
 		if beforeID > 0 && l.ID >= beforeID {
 			continue
 		}
@@ -143,6 +148,24 @@ func (f *fakeStore) ListLinks(_ context.Context, _ store.DBTX, limit int, before
 		all = all[:limit]
 	}
 	return all, nil
+}
+
+// SoftDeleteLink mirrors store.Store.SoftDeleteLink: stamps DeletedAt
+// on a live row, returns store.ErrNotFound if the code is absent or
+// already deleted. Failure injection isn't wired here because the
+// existing tests never need it; add a `failDelete error` field if a
+// future test does.
+func (f *fakeStore) SoftDeleteLink(_ context.Context, _ store.DBTX, code string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	l, ok := f.links[code]
+	if !ok || l.DeletedAt != nil {
+		return store.ErrNotFound
+	}
+	now := time.Now()
+	l.DeletedAt = &now
+	f.links[code] = l
+	return nil
 }
 
 // fakeCache implements handlers.LinkCache against an in-memory map. TTL is
@@ -805,5 +828,175 @@ func TestCachePut_ClampsTTLToExpiry(t *testing.T) {
 	cc.mu.Unlock()
 	if ttl <= 0 || ttl > 5*time.Minute+time.Second {
 		t.Errorf("cache TTL = %v, want <=5m (clamped to remaining lifetime)", ttl)
+	}
+}
+
+// --- Delete (soft-delete) ---------------------------------------------------
+
+// TestDelete_LiveCodeReturns204AndStampsDeletedAt: the happy path.
+// First DELETE flips the row to soft-deleted and returns 204 with no
+// body. We assert via the fake's internal state rather than going
+// through the API again because subsequent assertions (Get-after-delete
+// returns 410, Redirect-after-delete returns 410) get their own tests
+// below -- one assertion per test keeps failure messages pointed at
+// the actually-broken layer.
+func TestDelete_LiveCodeReturns204AndStampsDeletedAt(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "live123", "https://example.com", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodDelete, "/api/v1/links/live123", "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	if len(body) != 0 {
+		t.Errorf("expected empty body on 204, got %q", string(body))
+	}
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	got := st.links["live123"]
+	if got.DeletedAt == nil {
+		t.Fatal("DeletedAt is nil; expected soft-delete to have stamped it")
+	}
+	if got.TargetURL != "https://example.com" {
+		t.Errorf("TargetURL changed: %q", got.TargetURL)
+	}
+}
+
+// TestDelete_InvalidatesCacheEntry: a redirect that previously cached
+// the target must not keep serving it after the row is soft-deleted.
+// We seed the cache directly (rather than walking through Redirect)
+// to keep the assertion narrowly scoped to the cache-invalidation
+// behavior of Delete itself.
+func TestDelete_InvalidatesCacheEntry(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "cachehit", "https://example.com", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Pre-populate the cache to simulate a prior /r/cachehit.
+	if err := cc.Set(context.Background(), "link:cachehit", "https://example.com", time.Hour); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, _ := doJSON(t, e, http.MethodDelete, "/api/v1/links/cachehit", "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	if _, present := cc.values["link:cachehit"]; present {
+		t.Error("cache entry survived DELETE; Del should have invalidated it")
+	}
+}
+
+// TestDelete_UnknownCodeReturns404: there is no live row with that
+// code -- could be a typo, a never-existed code, or one that was
+// already deleted. All three collapse to the same not_found shape;
+// the API doesn't distinguish "never existed" from "already deleted"
+// to avoid leaking lifecycle metadata to clients that have no business
+// inspecting it.
+func TestDelete_UnknownCodeReturns404(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodDelete, "/api/v1/links/nosuch1", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	if got := decodeError(t, body); got.Code != handlers.ErrCodeNotFound {
+		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeNotFound)
+	}
+}
+
+// TestDelete_SecondDeleteReturns404: documents that DELETE is
+// semantically idempotent (the second call does not re-delete or
+// resurrect the row) but not response-shape idempotent: 204 then 404.
+// Clients that need 204+204 can collapse the two themselves.
+func TestDelete_SecondDeleteReturns404(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "twice12", "https://example.com", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, _ := doJSON(t, e, http.MethodDelete, "/api/v1/links/twice12", "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("first DELETE status = %d, want 204", rec.Code)
+	}
+	rec, body := doJSON(t, e, http.MethodDelete, "/api/v1/links/twice12", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("second DELETE status = %d, body = %s", rec.Code, string(body))
+	}
+}
+
+// TestDelete_InvalidCodeShapeReturns404: codes that fail
+// shortener.ValidCode (length, alphabet, ...) are rejected at the
+// edge with the same not_found response a missing code would
+// produce. Returning 422 here would leak that the API does
+// shape-validation on the path parameter, which doesn't help any
+// legitimate client.
+func TestDelete_InvalidCodeShapeReturns404(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodDelete, "/api/v1/links/has-hyphen", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+}
+
+// TestGet_DeletedLinkReturns410: parallels TestGet_ExpiredLinkReturns410.
+// A soft-deleted link must surface a 410 with the link_deleted error
+// code so programmatic clients can distinguish it from both
+// "never existed" (404) and "expired" (410 + link_expired).
+func TestGet_DeletedLinkReturns410(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "deleted", "https://example.com", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := st.SoftDeleteLink(context.Background(), nil, "deleted"); err != nil {
+		t.Fatalf("seed delete: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links/deleted", "")
+	if rec.Code != http.StatusGone {
+		t.Errorf("status = %d, want 410", rec.Code)
+	}
+	if got := decodeError(t, body); got.Code != handlers.ErrCodeLinkDeleted {
+		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeLinkDeleted)
+	}
+}
+
+// TestRedirect_DeletedLinkReturns410: the public redirect surfaces
+// the same 410 a /api/v1/links lookup does. Mirrors the
+// TestRedirect_ExpiredLinkReturns410 shape.
+func TestRedirect_DeletedLinkReturns410(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "deleted", "https://gone.example", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := st.SoftDeleteLink(context.Background(), nil, "deleted"); err != nil {
+		t.Fatalf("seed delete: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	req := httptest.NewRequest(http.MethodGet, "/r/deleted", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone {
+		t.Errorf("status = %d, want 410", rec.Code)
 	}
 }
