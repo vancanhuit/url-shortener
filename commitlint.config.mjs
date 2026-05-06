@@ -25,6 +25,6 @@ export default {
       "never",
       ["start-case", "pascal-case", "upper-case"],
     ],
-    "header-max-length": [2, "always", 100],
+    "header-max-length": [0],
   },
 };
