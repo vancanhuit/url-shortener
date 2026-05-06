@@ -8,8 +8,8 @@
     "lint:openapi": "spectral lint api/openapi.yaml --ruleset .spectral.yaml --fail-severity=warn"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.0.0",
-    "@commitlint/config-conventional": "^20.0.0",
+    "@commitlint/cli": "^20.5.3",
+    "@commitlint/config-conventional": "^20.5.3",
     "@stoplight/spectral-cli": "^6.15.1",
     "husky": "^9.1.7"
   },
