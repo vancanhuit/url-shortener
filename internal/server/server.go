@@ -117,6 +117,12 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	op.AddReadinessCheck("redis", deps.Cache.Ping)
 	op.Mount(e)
 
+	// API self-description: mount the embedded OpenAPI 3.1 document
+	// at /api/v1/openapi.{json,yaml} ahead of the JSON API itself so
+	// the routes are co-located with the rest of /api/v1/* in the
+	// router's mount log.
+	handlers.MountOpenAPI(e)
+
 	// Links API + redirect, plus the HTML web UI (form + recent list)
 	// mounted alongside; both reuse the same underlying *handlers.Links.
 	links := handlers.NewLinks(handlers.LinksConfig{

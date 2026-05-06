@@ -152,6 +152,18 @@ passwords replaced by `REDACTED`.
 
 ## API
 
+The full HTTP contract is described by an OpenAPI 3.1 document at
+[`api/openapi.yaml`](api/openapi.yaml). The same document is embedded
+into the binary and served at runtime:
+
+- `GET /api/v1/openapi.json` -- canonical machine-readable form.
+- `GET /api/v1/openapi.yaml` -- the original source for humans / tools
+  that prefer YAML.
+
+CI lints the spec on every push (`just lint-openapi`, backed by
+[Spectral](https://github.com/stoplightio/spectral) with the project
+ruleset at [`.spectral.yaml`](.spectral.yaml)).
+
 ```http
 POST /api/v1/links
 Content-Type: application/json
@@ -190,6 +202,8 @@ the redirect endpoint, bumped fire-and-forget on each successful
 | `GET    /api/v1/links/:code`| Fetch link metadata as JSON.                                                             |
 | `DELETE /api/v1/links/:code`| Soft-delete a link. Returns `204` on success, `404` thereafter; no body. See below.      |
 | `GET    /r/:code`           | 302 redirect to the link's `target_url`. Read-through Redis cache.                       |
+| `GET    /api/v1/openapi.json` | OpenAPI 3.1 document (machine-readable JSON, embedded at build time).                  |
+| `GET    /api/v1/openapi.yaml` | OpenAPI 3.1 document (original YAML source).                                           |
 
 Validation: `target_url` must be `http`/`https`, have a host, and be at most
 2048 characters. User-supplied codes must match `[0-9A-Za-z]{4,64}`.
