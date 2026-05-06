@@ -55,11 +55,17 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 
 # Pull the compiled web assets into web/static/ before `go build` so the
-# embed directive finds styles.css and htmx.min.js.
-COPY --from=web-builder /src/web/static/styles.css   ./web/static/styles.css
-COPY --from=web-builder /src/web/static/htmx.min.js  ./web/static/htmx.min.js
-COPY --from=web-builder /src/web/static/copy.js      ./web/static/copy.js
-COPY --from=web-builder /src/web/static/theme.js     ./web/static/theme.js
+# embed directive finds them. Includes the Tailwind/HTMX bundle for the
+# HTMX web UI plus the vendored Swagger UI + Redoc bundles for the API
+# docs viewers (/api/v1/docs and /api/v1/redoc).
+COPY --from=web-builder /src/web/static/styles.css                      ./web/static/styles.css
+COPY --from=web-builder /src/web/static/htmx.min.js                     ./web/static/htmx.min.js
+COPY --from=web-builder /src/web/static/copy.js                         ./web/static/copy.js
+COPY --from=web-builder /src/web/static/theme.js                        ./web/static/theme.js
+COPY --from=web-builder /src/web/static/swagger-ui.css                  ./web/static/swagger-ui.css
+COPY --from=web-builder /src/web/static/swagger-ui-bundle.js            ./web/static/swagger-ui-bundle.js
+COPY --from=web-builder /src/web/static/swagger-ui-standalone-preset.js ./web/static/swagger-ui-standalone-preset.js
+COPY --from=web-builder /src/web/static/redoc.standalone.js             ./web/static/redoc.standalone.js
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

@@ -33,6 +33,10 @@ node_modules/
 /web/static/htmx.min.js
 /web/static/copy.js
 /web/static/theme.js
+/web/static/swagger-ui.css
+/web/static/swagger-ui-bundle.js
+/web/static/swagger-ui-standalone-preset.js
+/web/static/redoc.standalone.js
 
 # Release artifacts produced by `just release-binaries`.
 /dist/
