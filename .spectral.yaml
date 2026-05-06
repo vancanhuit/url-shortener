@@ -1,0 +1,30 @@
+# Spectral ruleset for the url-shortener OpenAPI document.
+#
+# Inherits Spectral's bundled `oas` ruleset, which covers the
+# OpenAPI 3.x structural rules (correct schema shape, required
+# fields, no orphan refs, etc.) plus a long list of style nits.
+# A handful of opinionated style rules are turned down to `info`
+# or off entirely below; everything else fails the lint job at
+# `--fail-severity=warn`.
+extends:
+  - "spectral:oas"
+
+rules:
+  # info.contact has `name` + `url`; the bundled rule wants an
+  # email too. We don't publish a contact email and a fake one
+  # would be worse than none, so accept the partial contact.
+  contact-properties: off
+
+  # The `description` rule fires on every operation and parameter.
+  # Our spec already documents every operation and every
+  # non-trivial parameter; downgrade to info so additions get a
+  # nudge without failing the build the moment someone adds a
+  # path operation without a description.
+  operation-description: info
+  operation-tag-defined: warn
+
+  # info.license is fine -- we publish under MIT -- but the
+  # bundled rule wants both `name` *and* `url`. SPDX `identifier`
+  # (which we use) is the OpenAPI 3.1 successor and doesn't need
+  # a `url`. Turn the legacy rule off.
+  license-url: off

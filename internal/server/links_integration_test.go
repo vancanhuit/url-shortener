@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,6 +310,43 @@ func TestLinksAPI_DeleteFlow(t *testing.T) {
 	_ = dresp.Body.Close()
 	if dresp.StatusCode != http.StatusNotFound {
 		t.Errorf("second DELETE status = %d, want 404", dresp.StatusCode)
+	}
+}
+
+// TestServer_ServesEmbeddedOpenAPISpec proves that
+// `GET /api/v1/openapi.{json,yaml}` is wired into the live server and
+// returns the spec embedded at build time. Unit tests already cover
+// the handler-layer behavior in isolation (`MountOpenAPI`); this test
+// is the wiring check that catches a missing call from `server.New`.
+func TestServer_ServesEmbeddedOpenAPISpec(t *testing.T) {
+	base, stop := startFullServer(t)
+	defer stop()
+
+	resp, err := http.Get(base + "/api/v1/openapi.json")
+	if err != nil {
+		t.Fatalf("GET openapi.json: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json...", ct)
+	}
+	var doc map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if doc["openapi"] != "3.1.0" {
+		t.Errorf("openapi = %v, want 3.1.0", doc["openapi"])
+	}
+	// Cross-check: the served spec must declare the DELETE op
+	// landed in the previous PR. If it doesn't, the spec drifted
+	// out of sync with the code.
+	paths, _ := doc["paths"].(map[string]any)
+	link, _ := paths["/api/v1/links/{code}"].(map[string]any)
+	if _, ok := link["delete"]; !ok {
+		t.Error("served spec is missing DELETE /api/v1/links/{code}")
 	}
 }
 

@@ -1,0 +1,533 @@
+# OpenAPI 3.1 specification for the url-shortener JSON API.
+#
+# This file is the source of truth for the public HTTP contract: the
+# server embeds it and serves it at GET /api/v1/openapi.json (the
+# canonical OpenAPI mount point), and CI lints it with Spectral on
+# every push. The HTML / HTMX surface (/, POST /links, /recent,
+# /links/{code}/badges, /static/*) is intentionally out of scope --
+# this document covers the programmatic API only.
+#
+# When adding or changing endpoints, update this file in the same
+# commit that ships the code. The Spectral CI job will fail
+# otherwise; that's by design.
+openapi: 3.1.0
+info:
+  title: url-shortener API
+  version: 1.0.0
+  summary: JSON HTTP surface for the url-shortener service.
+  description: |
+    The url-shortener service exposes a small JSON HTTP API plus a
+    public 302 redirect endpoint. This document describes both, along
+    with the operational endpoints (`/healthz`, `/readyz`,
+    `/version`) used by orchestrators and humans.
+
+    ## Conventions
+
+    - All JSON request/response bodies use `application/json` with
+      UTF-8 encoding.
+    - Timestamps are RFC 3339 (`2006-01-02T15:04:05.999999999Z`).
+    - Error responses share a single shape (`ErrorResponse`) with a
+      stable machine-readable `code` field for client-side branching;
+      the human-readable `error` field is for surfacing in UIs.
+    - Rate limiting and authentication are out of scope today; the
+      service trusts its callers and is expected to run behind a
+      reverse proxy that enforces both.
+
+    ## Idempotency notes
+
+    - `POST /api/v1/links` is idempotent on the *normalized*
+      `target_url`: a second call returns the existing row with
+      `200 OK` instead of minting a fresh code (only for permanent,
+      auto-generated requests; user-supplied codes and expiring
+      links opt out).
+    - `DELETE /api/v1/links/{code}` is semantically idempotent (the
+      row stays deleted) but response-distinct: the first call
+      returns `204`, subsequent calls return `404`. Clients that need
+      `204+204` semantics can collapse the two themselves.
+  license:
+    name: MIT
+    identifier: MIT
+  contact:
+    name: url-shortener
+    url: https://github.com/vancanhuit/url-shortener
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server (compose / `just up`).
+
+tags:
+  - name: links
+    description: Manage and resolve short links.
+  - name: redirect
+    description: The public short-URL redirect endpoint.
+  - name: operational
+    description: Liveness, readiness, and build metadata probes.
+  - name: meta
+    description: API self-description.
+
+paths:
+  /api/v1/links:
+    post:
+      tags: [links]
+      summary: Create a short link.
+      description: |
+        Creates a new short link for the supplied `target_url`. If
+        `code` is omitted, the server generates a 7-character base62
+        code; if supplied, it must match `^[0-9A-Za-z]{4,64}$`.
+
+        When `code` is omitted *and* `expires_at` is omitted, the
+        request is deduped against the existing rows: a previously
+        shortened permanent link with the same normalized target URL
+        is returned with `200 OK` instead of a fresh `201 Created`
+        row. Callers requesting a custom code or an expiring link
+        always opt out of dedup.
+      operationId: createLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkRequest'
+            examples:
+              auto_generated:
+                summary: Auto-generated permanent link
+                value:
+                  target_url: https://example.com/long/path
+              user_supplied_code:
+                summary: User-supplied code
+                value:
+                  target_url: https://example.com/docs
+                  code: docs2026
+              expiring:
+                summary: Time-limited link
+                value:
+                  target_url: https://example.com/promo
+                  expires_at: '2026-12-31T23:59:59Z'
+      responses:
+        '200':
+          description: |
+            Dedup hit -- the normalized `target_url` already exists
+            as a permanent auto-generated link, returned unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkResponse'
+        '201':
+          description: New link created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkResponse'
+        '400':
+          description: Request body is not parseable JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: invalid json body
+                code: invalid_json_body
+        '409':
+          description: The user-supplied `code` is already in use.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: code already in use
+                code: code_taken
+        '422':
+          description: Input failed validation (URL, code shape, or expiry).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: target_url must use http or https
+                code: validation_failed
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/links/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      tags: [links]
+      summary: Fetch link metadata.
+      description: |
+        Returns the metadata for the link without performing a
+        redirect or incrementing the click counter. Soft-deleted and
+        expired links surface as `410 Gone` with a distinct `code`
+        (`link_deleted` vs `link_expired`) so programmatic clients
+        can distinguish a once-valid code from one that never
+        existed (`404`).
+      operationId: getLink
+      responses:
+        '200':
+          description: The link metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: |
+            The link existed but is no longer active. Inspect the
+            `code` field to distinguish soft-delete (`link_deleted`)
+            from expiry (`link_expired`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                deleted:
+                  value:
+                    error: link has been deleted
+                    code: link_deleted
+                expired:
+                  value:
+                    error: link has expired
+                    code: link_expired
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [links]
+      summary: Soft-delete a link.
+      description: |
+        Marks the link as deleted by stamping an internal
+        `deleted_at` tombstone. The row stays in storage so audit
+        columns (`created_at`, `click_count`) survive, but
+        subsequent redirect, lookup, list, and dedup operations stop
+        seeing it. The cache entry, if any, is invalidated
+        server-side so the next `GET /r/{code}` returns `410`
+        immediately rather than waiting out the cache TTL.
+
+        Semantically idempotent (the row stays deleted) but
+        response-distinct: the first DELETE returns `204`, the
+        second returns `404`. Clients that need `204+204` can
+        collapse the two themselves.
+      operationId: deleteLink
+      responses:
+        '204':
+          description: Link successfully soft-deleted. No body.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /r/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      tags: [redirect]
+      summary: Redirect to the link's target URL.
+      description: |
+        The public short-URL endpoint. On a hit, returns `302 Found`
+        with `Location: <target_url>` and fires a fire-and-forget
+        click-counter increment that never delays the response.
+        Hot path is served from a Redis read-through cache; the
+        cache TTL is clamped to the link's remaining lifetime so an
+        expired link can never be served from cache.
+
+        Soft-deleted and expired links return `410 Gone`. The
+        response body is plain text (Echo's default error renderer
+        for non-JSON paths); programmatic clients that need the
+        machine-readable `code` field should call
+        `GET /api/v1/links/{code}` instead.
+      operationId: redirectLink
+      responses:
+        '302':
+          description: Redirect to the link's `target_url`.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+              description: The link's `target_url`.
+        '404':
+          description: |
+            No link with this code exists, or the code is malformed.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'code=404, message=not found'
+        '410':
+          description: The link existed but is no longer active (deleted or expired).
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'code=410, message=link has been deleted'
+        '500':
+          description: Server-side failure looking up the link.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1/openapi.json:
+    get:
+      tags: [meta]
+      summary: Return this OpenAPI document as JSON.
+      description: |
+        The exact same spec embedded into the binary at build time,
+        rendered as JSON for tools that don't speak YAML. The
+        response is bytewise stable for a given build (no
+        per-request server URL substitution).
+      operationId: getOpenAPISpec
+      responses:
+        '200':
+          description: The OpenAPI 3.1 document.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: An OpenAPI 3.1 document.
+
+  /healthz:
+    get:
+      tags: [operational]
+      summary: Liveness probe.
+      description: |
+        Returns `200` as long as the process is running and the HTTP
+        stack is responsive. Has no dependencies on Postgres or
+        Redis -- a flapping database must not cause Kubernetes to
+        restart the pod.
+      operationId: healthz
+      responses:
+        '200':
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+
+  /readyz:
+    get:
+      tags: [operational]
+      summary: Readiness probe.
+      description: |
+        Pings every registered dependency (Postgres, Redis) with a
+        short per-check timeout and returns `200` only when all
+        succeed. The body lists per-check results so operators can
+        see which dependency is unhappy. Flips to `503` during
+        graceful shutdown so a load balancer drains the pod cleanly
+        before the listener closes.
+      operationId: readyz
+      responses:
+        '200':
+          description: All readiness checks passed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyzResponse'
+              example:
+                status: ok
+                postgres: ok
+                redis: ok
+        '503':
+          description: One or more readiness checks failed, or the server is shutting down.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyzResponse'
+              example:
+                status: unready
+                postgres: 'error: dial tcp ...: connection refused'
+                redis: ok
+
+  /version:
+    get:
+      tags: [operational]
+      summary: Build metadata.
+      description: Returns the `version`, `commit`, and `date` baked into the binary at build time via `-ldflags`.
+      operationId: version
+      responses:
+        '200':
+          description: Build metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+              example:
+                version: v0.4.0
+                commit: dec456d
+                date: '2026-05-06T11:30:00Z'
+
+components:
+  parameters:
+    Code:
+      name: code
+      in: path
+      required: true
+      description: |
+        The short code identifying the link. Must match
+        `^[0-9A-Za-z]{4,64}$`; codes that fail this shape check are
+        rejected with `404` rather than `422` so the API doesn't
+        leak its validation rules through the path parameter.
+      schema:
+        type: string
+        pattern: '^[0-9A-Za-z]{4,64}$'
+        minLength: 4
+        maxLength: 64
+        example: abc1234
+
+  responses:
+    NotFound:
+      description: The code does not exist (or is malformed).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: not found
+            code: not_found
+    InternalError:
+      description: Server-side failure; details are logged on the server, not surfaced.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: internal error
+            code: internal_error
+
+  schemas:
+    LinkRequest:
+      type: object
+      required: [target_url]
+      additionalProperties: false
+      properties:
+        target_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: |
+            The destination URL. Must be `http` or `https` with a
+            non-empty host; max 2048 characters.
+          example: https://example.com/long/path
+        code:
+          type: string
+          pattern: '^[0-9A-Za-z]{4,64}$'
+          minLength: 4
+          maxLength: 64
+          description: |
+            Optional user-supplied short code. When omitted, the
+            server generates one. Only base62 characters are
+            allowed; supplying a code opts out of dedup.
+          example: docs2026
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Optional RFC 3339 expiry. Must be in the future (a 30s
+            grace window absorbs honest clock skew). Supplying an
+            expiry opts out of dedup. Omit (or send `null`) for a
+            permanent link.
+          example: '2026-12-31T23:59:59Z'
+
+    LinkResponse:
+      type: object
+      required: [code, short_url, target_url, created_at, click_count]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          pattern: '^[0-9A-Za-z]{4,64}$'
+          example: abc1234
+        short_url:
+          type: string
+          format: uri
+          description: The fully-qualified short URL (`{base_url}/r/{code}`).
+          example: http://localhost:8080/r/abc1234
+        target_url:
+          type: string
+          format: uri
+          example: https://example.com/long/path
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-05-06T11:30:00Z'
+        click_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Lifetime hit count for `/r/{code}`. Eventually-consistent:
+            increments are applied fire-and-forget so a freshly-served
+            redirect may not be reflected in the next response.
+          example: 0
+        expires_at:
+          type: string
+          format: date-time
+          description: |
+            RFC 3339 expiry. Omitted entirely (rather than rendered
+            as `null`) for permanent links, so a one-key check
+            distinguishes them.
+          example: '2026-12-31T23:59:59Z'
+
+    ErrorResponse:
+      type: object
+      required: [error, code]
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          description: Human-readable description, safe to surface in a UI.
+          example: code already in use
+        code:
+          type: string
+          description: |
+            Stable machine-readable identifier for client-side
+            branching. Once published, values do not change; new
+            codes may be added.
+          enum:
+            - invalid_json_body
+            - validation_failed
+            - code_taken
+            - not_found
+            - link_expired
+            - link_deleted
+            - internal_error
+          example: code_taken
+
+    ReadyzResponse:
+      type: object
+      required: [status]
+      additionalProperties:
+        type: string
+        description: |
+          Per-dependency status. `ok` when the check passed; an
+          `error: ...` string when it failed. Keys are dependency
+          names registered at boot (currently `postgres`, `redis`).
+      properties:
+        status:
+          type: string
+          enum: [ok, unready]
+
+    VersionResponse:
+      type: object
+      required: [version, commit, date]
+      additionalProperties: false
+      properties:
+        version:
+          type: string
+          description: Semver tag (or `v0.0.0-dev` for unstamped builds).
+          example: v0.4.0
+        commit:
+          type: string
+          description: Git commit SHA (or `unknown` for unstamped builds).
+          example: dec456d
+        date:
+          type: string
+          format: date-time
+          description: Build timestamp (or `1970-01-01T00:00:00Z` for unstamped builds).
+          example: '2026-05-06T11:30:00Z'

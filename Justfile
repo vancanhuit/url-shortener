@@ -209,6 +209,20 @@ lint: lint-install web-build tidy
 fmt: lint-install
     {{ quote(BIN_DIR / "golangci-lint") }} fmt
 
+# Lint the OpenAPI 3.1 document at api/openapi.yaml with Spectral.
+# Spectral is installed as an npm devDependency (see package.json),
+# so the recipe depends on `init` to make sure node_modules/.bin is
+# populated. Configuration lives at .spectral.yaml at the repo root;
+# extend or override there rather than via flags so local + CI use
+# the same ruleset.
+#
+# `--fail-severity=warn` means the recipe (and the matching CI job)
+# fails on `warn`-or-higher findings. Bump to `error` if a noisy
+# style rule lands; tune the rule's severity in .spectral.yaml first.
+[group("lint")]
+lint-openapi: init
+    npm run lint:openapi
+
 # --- security -----------------------------------------------------------------
 
 # Run govulncheck against the source. govulncheck is the official Go

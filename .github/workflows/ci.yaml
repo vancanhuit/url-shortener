@@ -103,6 +103,34 @@ jobs:
       - name: just lint
         run: just lint
 
+  openapi:
+    name: openapi (spectral)
+    # Lint the OpenAPI 3.1 document at api/openapi.yaml using Spectral.
+    # Spectral lives in package.json's devDependencies and is invoked
+    # via `just lint-openapi`, which calls the `lint:openapi` npm
+    # script with the project ruleset (.spectral.yaml). A drift
+    # between the served spec and the code is caught by the Go unit
+    # + integration tests in the `go` / `go-integration` jobs; this
+    # job catches structural / style problems in the spec itself.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Spectral is a Node tool with no Go dependency; skip the Go
+      # module cache to keep this job's setup fast. The npm cache is
+      # keyed on the root package-lock.json (where @stoplight/spectral-cli
+      # lives) by the composite default.
+      - uses: ./.github/actions/setup-toolchain
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+          go-cache: "false"
+          node-cache-dependency-path: package-lock.json
+      - name: just lint-openapi
+        run: just lint-openapi
+
   vuln:
     name: govulncheck
     runs-on: ubuntu-latest
