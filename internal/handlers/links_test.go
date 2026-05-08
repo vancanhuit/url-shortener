@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -998,5 +999,191 @@ func TestRedirect_DeletedLinkReturns410(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusGone {
 		t.Errorf("status = %d, want 410", rec.Code)
+	}
+}
+
+// --- List -------------------------------------------------------------------
+
+// decodeList decodes a /api/v1/links list body into the public shape.
+func decodeList(t *testing.T, body []byte) handlers.ListResponse {
+	t.Helper()
+	var resp handlers.ListResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode list: %v\nbody = %s", err, string(body))
+	}
+	return resp
+}
+
+func TestList_EmptyStoreReturnsEmptyItemsAndNullCursor(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	resp := decodeList(t, body)
+	if len(resp.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(resp.Items))
+	}
+	if resp.NextCursor != nil {
+		t.Errorf("next_cursor = %v, want null", *resp.NextCursor)
+	}
+	// Explicit JSON-shape check: the contract says next_cursor is
+	// always present (rendered as null) so clients can branch on a
+	// single nullability check.
+	if !bytes.Contains(body, []byte(`"next_cursor":null`)) {
+		t.Errorf("body should render next_cursor:null, got %s", string(body))
+	}
+}
+
+func TestList_DefaultsTo10NewestFirstWithCursorWhenMore(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	// Seed 12 links so the default page-size of 10 returns 10 + a cursor.
+	for i := 0; i < 12; i++ {
+		code := fmt.Sprintf("code%03d", i)
+		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	resp := decodeList(t, body)
+	if len(resp.Items) != 10 {
+		t.Fatalf("items = %d, want 10", len(resp.Items))
+	}
+	if resp.NextCursor == nil || *resp.NextCursor <= 0 {
+		t.Fatalf("next_cursor = %v, want positive", resp.NextCursor)
+	}
+	// Newest-first: code011 was inserted last and should lead.
+	if resp.Items[0].Code != "code011" {
+		t.Errorf("items[0].Code = %q, want code011", resp.Items[0].Code)
+	}
+}
+
+func TestList_BeforeCursorWalksOlderRows(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	for i := 0; i < 5; i++ {
+		code := fmt.Sprintf("walk%03d", i)
+		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links?limit=2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	first := decodeList(t, body)
+	if len(first.Items) != 2 || first.NextCursor == nil {
+		t.Fatalf("first page: items=%d cursor=%v body=%s", len(first.Items), first.NextCursor, string(body))
+	}
+
+	rec, body = doJSON(t, e, http.MethodGet,
+		fmt.Sprintf("/api/v1/links?limit=2&before=%d", *first.NextCursor), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second page status = %d, body = %s", rec.Code, string(body))
+	}
+	second := decodeList(t, body)
+	if len(second.Items) != 2 {
+		t.Fatalf("second page items = %d, want 2", len(second.Items))
+	}
+	// The first row of page 2 must be older than the last row of page 1.
+	if second.Items[0].Code == first.Items[1].Code {
+		t.Errorf("page 2 should not repeat the cursor row %q", first.Items[1].Code)
+	}
+}
+
+func TestList_LimitClampedToMax(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	for i := 0; i < 3; i++ {
+		code := fmt.Sprintf("clamp%02d", i)
+		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	// 1000 is far above the 100 cap; the handler should silently
+	// clamp rather than 4xx.
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links?limit=1000", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	resp := decodeList(t, body)
+	if len(resp.Items) != 3 {
+		t.Errorf("items = %d, want 3 (no clamp-induced truncation when fewer rows exist)", len(resp.Items))
+	}
+}
+
+func TestList_BadLimitFallsBackToDefault(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	for i := 0; i < 11; i++ {
+		code := fmt.Sprintf("bad%04d", i)
+		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	for _, raw := range []string{"abc", "-5", "0"} {
+		rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links?limit="+raw, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("limit=%q status = %d, body = %s", raw, rec.Code, string(body))
+		}
+		resp := decodeList(t, body)
+		if len(resp.Items) != 10 {
+			t.Errorf("limit=%q items = %d, want default 10", raw, len(resp.Items))
+		}
+	}
+}
+
+func TestList_StoreFailureReturns500(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	st.failList = errors.New("boom")
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links", "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	if got := decodeError(t, body).Code; got != handlers.ErrCodeInternal {
+		t.Errorf("error code = %q, want %q", got, handlers.ErrCodeInternal)
+	}
+}
+
+func TestList_ExcludesSoftDeletedRows(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	for _, code := range []string{"keep001", "remove1", "keep002"} {
+		if _, err := st.CreateLink(context.Background(), nil, code, "https://example.com/"+code, nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	if err := st.SoftDeleteLink(context.Background(), nil, "remove1"); err != nil {
+		t.Fatalf("seed delete: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	resp := decodeList(t, body)
+	for _, item := range resp.Items {
+		if item.Code == "remove1" {
+			t.Errorf("list returned soft-deleted code %q", item.Code)
+		}
 	}
 }

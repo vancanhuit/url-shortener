@@ -68,33 +68,41 @@ init:
 
 # Build the binary into ./bin/url-shortener. The web UI is embedded via
 # `//go:embed`, so this recipe always re-runs `just web-build` first to
-# pick up template / CSS-class changes. Tailwind + the htmx vendor copy
-# together take ~200ms when npm deps are already installed.
+# pick up SPA changes (Svelte components, Tailwind classes, vendored
+# docs assets). Vite's incremental build is fast (~1-2s warm).
 [group("dev")]
 build: web-build
     mkdir -p bin
     CGO_ENABLED=0 go build -trimpath -ldflags='{{ LDFLAGS }}' -o bin/url-shortener ./cmd/url-shortener
 
-# Install npm deps for the web tailwind toolchain (idempotent).
+# Install npm deps for the web SPA toolchain (idempotent).
 [group("setup")]
-[working-directory("web/tailwind")]
+[working-directory("web")]
 web-install:
     npm ci
 
-# Compile Tailwind CSS and vendor htmx.min.js into web/static/. The Go
-# binary embeds these via `//go:embed` in web/web.go, so re-run this
-# after touching templates or CSS classes.
+# Build the Vite + Svelte SPA into web/dist/. The Go binary embeds
+# `web/dist/` via `//go:embed` in web/web.go, so re-run this after
+# touching anything under web/src/, web/public/, or web/index.html.
 [group("dev")]
-[working-directory("web/tailwind")]
+[working-directory("web")]
 web-build: web-install
     npm run build
 
-# Tailwind in watch mode for fast UI iteration. Requires `just up` (or
-# `just dev`) so the server is reloading the binary in another terminal.
+# Vite dev server with HMR. Proxies API + redirect routes to the Go
+# server on :8080 (see web/vite.config.ts), so run `just dev` in
+# another terminal first.
 [group("dev")]
-[working-directory("web/tailwind")]
-web-watch: web-install
-    npm run watch:css
+[working-directory("web")]
+web-dev: web-install
+    npm run dev
+
+# Run svelte-check + tsc against the SPA. Used by the lint
+# pipeline locally; CI calls the same recipe.
+[group("lint")]
+[working-directory("web")]
+web-check: web-install
+    npm run check
 
 # Run the binary locally.
 [group("dev")]
@@ -357,13 +365,30 @@ compose-smoke:
     echo "$body" | grep -qi "<title>URL Shortener</title>" \
         || { echo "index page missing <title>URL Shortener</title>"; exit 1; }
 
-    # The web-builder Dockerfile stage emits styles.css / htmx.min.js /
-    # theme.js / copy.js into web/static/, then //go:embed bundles them
-    # into the binary. If any of these 404 the embed list and the
+    # The web-builder Dockerfile stage emits the SPA shell + hashed
+    # bundles into web/dist/, plus the vendored Swagger UI / Redoc
+    # files under web/dist/static/. //go:embed then bundles all of
+    # them into the binary. We assert two things here:
+    #
+    #   1. At least one Vite-hashed asset is referenced from the
+    #      shell (regression catch: the bundle was emitted but the
+    #      shell wasn't republished).
+    #   2. The vendored docs assets are reachable at /static/* (the
+    #      OpenAPI docs handlers point at those exact paths).
+    #
+    # If any of these 404 or fail to match, the embed list and the
     # Dockerfile have drifted apart -- the Go binary would still build
     # clean, which is exactly the regression class this check catches.
-    echo "== embedded static assets =="
-    for asset in styles.css htmx.min.js theme.js copy.js; do
+    echo "== SPA hashed asset reachable =="
+    asset_path=$(echo "$body" \
+        | grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' \
+        | head -1)
+    test -n "$asset_path" \
+        || { echo "index page references no /assets/* bundle"; exit 1; }
+    curl --fail-with-body -sS -o /dev/null "$base$asset_path"
+
+    echo "== vendored docs assets =="
+    for asset in swagger-ui.css swagger-ui-bundle.js swagger-ui-standalone-preset.js redoc.standalone.js; do
         curl --fail-with-body -sS -o /dev/null "$base/static/$asset"
     done
 

@@ -15,8 +15,10 @@ A small URL shortener service written in Go.
 - Redis via [`go-redis/v9`](https://github.com/redis/go-redis).
 - [Goose](https://github.com/pressly/goose) for database migrations
   (embedded in the binary).
-- HTML UI with [Tailwind CSS v4](https://tailwindcss.com/) and
-  [HTMX 2.x](https://htmx.org/).
+- Single-page web UI built with [Svelte 5](https://svelte.dev/) +
+  [Vite](https://vite.dev/) + [Tailwind CSS v4](https://tailwindcss.com/),
+  written in TypeScript and compiled into hashed bundles that the Go
+  binary embeds via `//go:embed`.
 - [Just](https://github.com/casey/just) as the task runner.
 - [Dagger](https://dagger.io/) for the CI/CD pipeline (added in a later phase).
 
@@ -36,8 +38,8 @@ Prerequisites:
 - **Go 1.26+** &mdash; the language. The pinned toolchain version
   lives in `go.mod` (`toolchain go1.26.x`); newer is fine, older
   isn't.
-- **Node.js 24+** &mdash; for the Tailwind v4 + HTMX toolchain in
-  `web/tailwind/`. Required only when building the web assets
+- **Node.js 24+** &mdash; for the Vite + Svelte + Tailwind v4 SPA
+  toolchain under `web/`. Required only when building the web assets
   locally; the `Dockerfile` brings its own Node stage.
 - **[Just](https://github.com/casey/just)** &mdash; the task runner;
   every workflow in this README routes through it.
@@ -69,9 +71,10 @@ will install what it needs into `$(go env GOPATH)/bin` on demand.
 
 ```sh
 just init                              # install husky/commitlint dev dependencies
-just web-install                       # install npm deps for the tailwind + htmx toolchain
-just web-build                         # compile tailwind CSS and vendor htmx into web/static
-just web-watch                         # tailwind in watch mode for UI iteration
+just web-install                       # install npm deps for the Svelte + Vite + Tailwind toolchain
+just web-build                         # build the SPA into web/dist/ (consumed by //go:embed)
+just web-dev                           # vite dev server with HMR (proxies API + redirect to :8080)
+just web-check                         # svelte-check + tsc strict type-check
 just build                             # build ./bin/url-shortener (depends on web-build)
 just test                              # run unit tests with -race -v -cover
 just test-integration                  # bring up test-profile infra, migrate, run -tags=integration tests
@@ -280,29 +283,28 @@ and the dedup lookup excludes rows that themselves have a non-null
 
 ## Web UI
 
-The binary serves a small HTML UI at `/`:
+The binary serves a single-page Svelte app at `/`:
 
 - A paste-URL form with optional custom code and an Expires select
-  (Never / 1h / 1d / 7d / 30d), posted via HTMX so success and error
-  states swap inline without a page reload.
+  (Never / 1h / 1d / 7d / 30d). Submit fires `POST /api/v1/links` and
+  the result / error panels render in place without a navigation.
 - A copy-to-clipboard button on the result panel, plus an inline
   expiry hint when one was set.
 - A "Recent" list backed by Postgres, paginated cursor-style via the
-  `id DESC` order. Each row carries a click-count badge and (when
-  applicable) an `expires in Nh / Nd left` / `expired` badge.
-  - Each row's badges self-poll `GET /links/:code/badges` every 5
-    seconds via HTMX and swap themselves outerHTML, so click counts
-    and expiry labels refresh live without disturbing siblings or
-    rows that were appended via *Load more*.
-  - The *Load more* button fetches `/recent?before=<id>` and HTMX
-    appends rows + replaces the cursor.
+  `id DESC` order. Each row carries a click-count badge, an inline
+  expiry badge, and a *Delete* button.
+  - Each row polls `GET /api/v1/links/:code` every 5s and refreshes
+    its click-count + expiry view in place. A row that 404s or 410s
+    is dropped on the next refresh of the parent list.
+  - *Load more* fetches `GET /api/v1/links?before=<cursor>` and
+    appends rows; pagination ends when `next_cursor` is `null`.
 
-Static assets are served under `/static/` from the embedded FS:
+Static assets are served from the embedded `web/dist/` filesystem:
 
-- `/static/styles.css` &mdash; compiled Tailwind v4 bundle
-- `/static/htmx.min.js` &mdash; vendored HTMX 2
-- `/static/copy.js` &mdash; copy-to-clipboard helper
-- `/static/theme.js` &mdash; dark/light theme toggle
+- `/`              &mdash; SPA shell (`index.html`, `Cache-Control: no-cache`)
+- `/assets/*`      &mdash; Vite-hashed JS / CSS bundles (immutable, 1y)
+- `/static/*`      &mdash; vendored Swagger UI + Redoc bundles for the
+  `/api/v1/docs` and `/api/v1/redoc` viewers (must-revalidate, 1h)
 
 ## Operational endpoints
 
@@ -442,10 +444,10 @@ internal/
   cache/                  redis client wrapper                           (present)
   migrate/                goose runner over embedded SQL                 (present)
 migrations/               goose .sql migrations (//go:embed)             (present)
-web/                      html/template files + embed                   (present)
-web/templates/            html/template files                            (present)
-web/static/               compiled tailwind css + vendored htmx          (present)
-web/tailwind/             tailwind v4 toolchain (npm)                    (present)
+web/                      Svelte SPA + Go embed glue                     (present)
+web/src/                  Svelte components + API + helpers (TS)         (present)
+web/public/static/        vendored Swagger UI + Redoc bundles            (build artifact)
+web/dist/                 vite production build (//go:embed target)      (build artifact)
 .dagger/                  dagger module (Go SDK)
 ```
 
@@ -732,7 +734,7 @@ week produces one PR per group rather than N separate PRs:
 | `gomod`          | `go.mod`                                     | `gomod-minor-and-patch`          |
 | `github-actions` | `.github/workflows/*.yaml` (SHA-pinned)      | `actions-minor-and-patch`        |
 | `npm` (root)     | `package.json` (husky + commitlint)          | `npm-root-minor-and-patch`       |
-| `npm` (tailwind) | `web/tailwind/package.json`                  | `npm-tailwind-minor-and-patch`   |
+| `npm` (web SPA)  | `web/package.json`                           | `npm-web-minor-and-patch`        |
 | `docker`         | `Dockerfile` `FROM` lines (golang, node, distroless) | `docker-minor-and-patch` |
 
 Major-version bumps stay outside the groups and arrive as individual

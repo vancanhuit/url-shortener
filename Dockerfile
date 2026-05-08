@@ -11,24 +11,26 @@ ARG GO_VERSION=1.26.3
 ARG NODE_VERSION=24.15.0
 
 # -----------------------------------------------------------------------------
-# Web-assets stage: compile Tailwind CSS and vendor htmx.min.js.
-# These are .gitignore'd build artifacts that the Go binary embeds via
-# `//go:embed`, so they have to exist before the Go builder runs. Pinned
-# to BUILDPLATFORM since the toolchain is JS, not arch-specific.
+# Web-assets stage: build the Vite + Svelte SPA into web/dist/.
+# `web/dist/` is .gitignore'd because the Go binary embeds it via
+# `//go:embed` -- so it has to exist before the Go builder runs.
+# Pinned to BUILDPLATFORM since the toolchain is JS, not arch-specific.
 # -----------------------------------------------------------------------------
 FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-trixie-slim AS web-builder
 
 WORKDIR /src/web
 
-# Cache npm install separately from the rest of the source tree.
-COPY web/tailwind/package.json web/tailwind/package-lock.json* ./tailwind/
+# Cache npm install separately from the rest of the SPA source tree;
+# `package*.json` are the only files that gate the install.
+COPY web/package.json web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    cd tailwind && npm ci
+    npm ci
 
-# Templates feed Tailwind's content scanner; static/ is the output dir.
-COPY web/templates ./templates
-COPY web/tailwind ./tailwind
-RUN cd tailwind && npm run build
+# Bring in everything Vite needs: SPA source, the index.html shell,
+# `public/` static-asset overrides, the vendor-docs-assets script,
+# tsconfig + svelte.config + vite.config.
+COPY web/ ./
+RUN npm run build
 
 # -----------------------------------------------------------------------------
 # Builder stage: cross-compile the Go binary.
@@ -54,18 +56,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY . .
 
-# Pull the compiled web assets into web/static/ before `go build` so the
-# embed directive finds them. Includes the Tailwind/HTMX bundle for the
-# HTMX web UI plus the vendored Swagger UI + Redoc bundles for the API
-# docs viewers (/api/v1/docs and /api/v1/redoc).
-COPY --from=web-builder /src/web/static/styles.css                      ./web/static/styles.css
-COPY --from=web-builder /src/web/static/htmx.min.js                     ./web/static/htmx.min.js
-COPY --from=web-builder /src/web/static/copy.js                         ./web/static/copy.js
-COPY --from=web-builder /src/web/static/theme.js                        ./web/static/theme.js
-COPY --from=web-builder /src/web/static/swagger-ui.css                  ./web/static/swagger-ui.css
-COPY --from=web-builder /src/web/static/swagger-ui-bundle.js            ./web/static/swagger-ui-bundle.js
-COPY --from=web-builder /src/web/static/swagger-ui-standalone-preset.js ./web/static/swagger-ui-standalone-preset.js
-COPY --from=web-builder /src/web/static/redoc.standalone.js             ./web/static/redoc.standalone.js
+# Pull the Vite SPA build output (`dist/`) into the Go source tree so
+# the //go:embed directive finds it. The directory contains the SPA
+# shell (index.html), Vite's hashed bundles under assets/, and the
+# vendored Swagger UI + Redoc files under static/ (used by the API
+# docs viewers at /api/v1/docs and /api/v1/redoc).
+COPY --from=web-builder /src/web/dist ./web/dist
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -89,7 +85,7 @@ FROM gcr.io/distroless/static-debian13:nonroot
 # fixed identity here means `docker build` outside CI inherits them
 # too. See https://github.com/opencontainers/image-spec/blob/main/annotations.md
 LABEL org.opencontainers.image.title="url-shortener" \
-      org.opencontainers.image.description="A small URL-shortener service with a JSON API and HTMX web UI." \
+      org.opencontainers.image.description="A small URL-shortener service with a JSON API and Svelte web UI." \
       org.opencontainers.image.source="https://github.com/vancanhuit/url-shortener" \
       org.opencontainers.image.url="https://github.com/vancanhuit/url-shortener" \
       org.opencontainers.image.documentation="https://github.com/vancanhuit/url-shortener#readme" \

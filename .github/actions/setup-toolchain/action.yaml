@@ -20,9 +20,11 @@ inputs:
   node-cache-dependency-path:
     description: >-
       Lockfile path forwarded to actions/setup-node's `cache-dependency-path`.
-      Defaults to the Tailwind/htmx toolchain that `just web-build` consumes.
+      Defaults to the Vite + Svelte SPA toolchain that `just web-build`
+      consumes. Override per-job (e.g. with `package-lock.json`) for jobs
+      that only need the root `husky + commitlint` toolchain.
     required: false
-    default: web/tailwind/package-lock.json
+    default: web/package-lock.json
 
 runs:
   using: composite

@@ -67,6 +67,54 @@ tags:
 
 paths:
   /api/v1/links:
+    get:
+      tags: [links]
+      summary: List recent links.
+      description: |
+        Returns a page of links ordered newest-first (by internal id),
+        suitable for the recent-links view in the web UI. Pagination is
+        cursor-based: pass the previous response's `next_cursor` as the
+        `before` query parameter on the next request to walk older
+        rows. `next_cursor` is `null` on the last page.
+
+        Soft-deleted and expired rows are excluded server-side, so a
+        busy site that prunes regularly still pages predictably. Bad or
+        out-of-range `limit` values fall back to the default rather
+        than failing the request.
+      operationId: listLinks
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: |
+            Page size. Defaults to 10. Values above 100 are silently
+            clamped down. Non-positive or non-numeric values fall back
+            to the default.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: before
+          in: query
+          required: false
+          description: |
+            Exclusive lower bound on the row id; pass the previous
+            page's `next_cursor` to walk backwards in time. Omit (or
+            pass `0`) for the first page.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: A page of links.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [links]
       summary: Create a short link.
@@ -433,6 +481,25 @@ components:
             expiry opts out of dedup. Omit (or send `null`) for a
             permanent link.
           example: '2026-12-31T23:59:59Z'
+
+    ListResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          description: Links on this page, ordered newest-first.
+          items:
+            $ref: '#/components/schemas/LinkResponse'
+        next_cursor:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 1
+          description: |
+            Opaque cursor for the next page. Pass it back as the
+            `before` query parameter; `null` on the last page.
 
     LinkResponse:
       type: object
