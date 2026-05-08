@@ -55,7 +55,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # commitlint runs `just init`, which `npm ci`s the root toolchain
       # (husky + @commitlint/*). Point the npm cache at the root lockfile
-      # rather than the Tailwind one, and skip the Go module cache since
+      # rather than the SPA one, and skip the Go module cache since
       # this job never invokes the Go toolchain.
       - uses: ./.github/actions/setup-toolchain
         with:
@@ -85,10 +85,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-      # `just build` depends on `web-build`, which `npm ci`s the Tailwind +
-      # htmx toolchain in web/tailwind/ and emits the .gitignore'd assets
-      # the Go binary embeds. The composite caches Go modules and npm,
-      # keyed on web/tailwind/package-lock.json by default.
+      # `just build` depends on `web-build`, which `npm ci`s the
+      # Vite + Svelte SPA toolchain in web/ and emits .gitignore'd
+      # build artifacts under web/dist/ that the Go binary embeds.
+      # The composite caches Go modules and npm, keyed on
+      # web/package-lock.json by default.
       - uses: ./.github/actions/setup-toolchain
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -130,6 +131,28 @@ jobs:
           node-cache-dependency-path: package-lock.json
       - name: just lint-openapi
         run: just lint-openapi
+
+  web:
+    name: web (svelte-check)
+    # Type-check + Svelte-check the SPA. The `go` job already runs the
+    # Vite production build via `just build` -> `web-build`, but that
+    # path tolerates type errors (Svelte's compiler skips strict
+    # checks). svelte-check + tsc are the strict gate; we run them in
+    # their own job so the diagnostic output is easy to find.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-toolchain
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+          go-cache: "false"
+      - name: just web-check
+        run: just web-check
 
   vuln:
     name: govulncheck

@@ -1,16 +1,17 @@
-/* Tailwind v4 entrypoint: a single @import pulls the engine in. The
- * @source directive tells Tailwind which files to scan for class usage.
- * Relative paths resolve against this file's directory.
+/* Tailwind v4 entrypoint. The `@source` directives below tell Tailwind
+ * which files to scan for class usage (Svelte components + the SPA
+ * shell index.html).
  */
 @import "tailwindcss";
 
-@source "../templates/**/*.html";
+@source "../index.html";
+@source "./**/*.{svelte,js}";
 
-/* Class-based dark mode (the `dark` class is set on <html> by the
- * inline boot script in layout.html). The `:where()` wrapper keeps
- * specificity at zero so user-supplied selectors keep their natural
- * weight. Default Tailwind v4 dark variant tracks the OS media
- * query, which we override here to give users an explicit toggle. */
+/* Class-based dark mode. The `dark` class is set on <html> by the
+ * inline boot script in index.html and the ThemeToggle component;
+ * the `:where()` wrapper keeps specificity at zero so user-supplied
+ * selectors keep their natural weight.
+ */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Suppress Chrome / WebKit autofill's yellow-tinted background and
@@ -23,15 +24,6 @@
  * native colour transition long enough that ours wins on focus.
  */
 @layer base {
-  /* `:-webkit-autofill` covers the post-fill state; the
-   * `:-internal-autofill-*` Chromium pseudos cover the *preview*
-   * state shown when Chrome highlights a saved suggestion before the
-   * user has actually selected it -- which is what produces the
-   * grey-ish overlay we'd otherwise still see on first paint.
-   * `!important` is unfortunately necessary: the user-agent
-   * stylesheet attaches `background-color` to the autofill state
-   * with high specificity, and without `!important` our box-shadow
-   * fill loses to it intermittently. */
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus,

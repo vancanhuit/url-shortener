@@ -1,0 +1,27 @@
+{
+  "name": "url-shortener-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vite + Svelte + Tailwind v4 SPA for the url-shortener web UI.",
+  "scripts": {
+    "dev": "vite",
+    "vendor:docs": "node scripts/vendor-docs-assets.mjs",
+    "prebuild": "npm run vendor:docs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tailwindcss/vite": "^4.2.4",
+    "@tsconfig/svelte": "^5.0.8",
+    "redoc": "^2.5.2",
+    "svelte": "^5.55.5",
+    "svelte-check": "^4.4.8",
+    "swagger-ui-dist": "^5.32.5",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.11"
+  }
+}

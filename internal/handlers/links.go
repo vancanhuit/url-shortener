@@ -18,6 +18,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -144,10 +145,25 @@ func NewLinks(cfg LinksConfig) *Links {
 // top-level routes like `/api`, static assets, or HTML pages.
 func (h *Links) Mount(e *echo.Echo) {
 	e.POST("/api/v1/links", h.Create)
+	e.GET("/api/v1/links", h.List)
 	e.GET("/api/v1/links/:code", h.Get)
 	e.DELETE("/api/v1/links/:code", h.Delete)
 	e.GET("/r/:code", h.Redirect)
 }
+
+// listDefaultPageSize is the default page size for `GET /api/v1/links`
+// when the client doesn't pass a `limit` query parameter. Tuned for
+// the web UI's recent-list (which fetches the first page on load):
+// large enough to fill a typical viewport, small enough that the
+// payload + Postgres scan stay cheap.
+const listDefaultPageSize = 10
+
+// listMaxPageSize is the upper bound enforced on the `limit` query
+// parameter. Higher values are silently clamped down rather than
+// rejected so a curious caller doesn't get a 422 for asking for "all
+// of them"; the sentinel keeps a runaway client from forcing the
+// server to materialize a multi-MB page.
+const listMaxPageSize = 100
 
 // --- request / response shapes ----------------------------------------------
 
@@ -155,6 +171,16 @@ type createReq struct {
 	TargetURL string     `json:"target_url"`
 	Code      string     `json:"code,omitempty"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// ListResponse is the JSON shape returned by GET /api/v1/links. Items
+// are ordered newest-first and capped by the request's `limit` query
+// parameter (with a server-side default + maximum). NextCursor is a
+// link id suitable for the `before` query parameter on the next page;
+// it is rendered as `null` when there are no more rows.
+type ListResponse struct {
+	Items      []LinkResponse `json:"items"`
+	NextCursor *int64         `json:"next_cursor"`
 }
 
 // LinkResponse is the JSON shape returned by Create and Get.
@@ -327,23 +353,14 @@ func (h *Links) Persist(ctx context.Context, target, userCode string, expiresAt 
 	return link, true, nil
 }
 
-// Resolve returns the link for code, or store.ErrNotFound for either an
-// unknown code or one that fails the syntactic validity check (avoiding a
-// pointless DB round-trip for obvious junk).
-func (h *Links) Resolve(ctx context.Context, code string) (store.Link, error) {
-	if !shortener.ValidCode(code) {
-		return store.Link{}, store.ErrNotFound
-	}
-	return h.store.GetLinkByCode(ctx, nil, code)
-}
-
-// List returns up to pageSize links ordered newest-first, plus a cursor
-// for the next page (0 when there are no more rows). beforeID, when
-// non-zero, advances past a previous page; pass 0 for the first page.
+// listPage returns up to pageSize links ordered newest-first, plus a
+// cursor for the next page (0 when there are no more rows). beforeID,
+// when non-zero, advances past a previous page; pass 0 for the first
+// page.
 //
-// Internally it requests pageSize+1 rows so the caller can detect "more
-// available" without a separate COUNT query.
-func (h *Links) List(ctx context.Context, pageSize int, beforeID int64) ([]store.Link, int64, error) {
+// Internally it requests pageSize+1 rows so the caller can detect
+// "more available" without a separate COUNT query.
+func (h *Links) listPage(ctx context.Context, pageSize int, beforeID int64) ([]store.Link, int64, error) {
 	if pageSize <= 0 {
 		return nil, 0, nil
 	}
@@ -358,11 +375,6 @@ func (h *Links) List(ctx context.Context, pageSize int, beforeID int64) ([]store
 	rows = rows[:pageSize]
 	return rows, rows[len(rows)-1].ID, nil
 }
-
-// Response renders a Link as the public LinkResponse shape (with the
-// canonical short_url derived from BaseURL). Exported so the web handler
-// can format recent-list entries the same way the API does.
-func (h *Links) Response(l store.Link) LinkResponse { return h.makeResp(l) }
 
 // --- handlers ---------------------------------------------------------------
 
@@ -435,6 +447,63 @@ func (h *Links) Get(c *echo.Context) error {
 		return c.JSON(http.StatusGone, errResp(ErrCodeLinkExpired, "link has expired"))
 	}
 	return c.JSON(http.StatusOK, h.makeResp(link))
+}
+
+// List implements GET /api/v1/links. Returns up to `limit` links
+// ordered newest-first plus an opaque cursor for the next page.
+//
+// Query parameters:
+//
+//   - limit  -- page size, defaulted to listDefaultPageSize and clamped
+//     to listMaxPageSize. Negative or non-numeric values fall back to
+//     the default rather than failing the request.
+//   - before -- exclusive lower bound on the row id; pass the previous
+//     page's `next_cursor` to walk backwards in time. 0 / missing
+//     means "first page".
+//
+// Soft-deleted and expired rows are excluded by the underlying store
+// query, so a busy site that prunes regularly still pages predictably.
+// The handler never returns 4xx for a syntactically valid request --
+// an unknown `before` cursor simply yields an empty page.
+func (h *Links) List(c *echo.Context) error {
+	limit := listDefaultPageSize
+	if raw := c.QueryParam("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > listMaxPageSize {
+		limit = listMaxPageSize
+	}
+
+	var beforeID int64
+	if raw := c.QueryParam("before"); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			beforeID = n
+		}
+	}
+
+	rows, cursor, err := h.listPage(c.Request().Context(), limit, beforeID)
+	if err != nil {
+		h.logger.Error("links: list", "error", err)
+		return c.JSON(http.StatusInternalServerError,
+			errResp(ErrCodeInternal, "internal error"))
+	}
+
+	items := make([]LinkResponse, len(rows))
+	for i, l := range rows {
+		items[i] = h.makeResp(l)
+	}
+
+	resp := ListResponse{Items: items}
+	if cursor > 0 {
+		// Encode "no more rows" as JSON null rather than 0 so clients
+		// can branch on a single nullability check without smuggling a
+		// magic number in the contract.
+		next := cursor
+		resp.NextCursor = &next
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 // Delete implements DELETE /api/v1/links/:code. It performs a

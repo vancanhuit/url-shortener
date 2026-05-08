@@ -55,9 +55,10 @@ updates:
       npm-root-minor-and-patch:
         update-types: [minor, patch]
 
-  # Tailwind v4 + htmx toolchain that produces the embedded web assets.
+  # Vite + Svelte + Tailwind v4 SPA toolchain that produces the
+  # embedded web assets (web/dist/).
   - package-ecosystem: npm
-    directory: /web/tailwind
+    directory: /web
     schedule:
       interval: weekly
       day: monday
@@ -66,7 +67,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      npm-tailwind-minor-and-patch:
+      npm-web-minor-and-patch:
         update-types: [minor, patch]
 
   # Base images referenced by FROM ... in Dockerfile (golang, node,

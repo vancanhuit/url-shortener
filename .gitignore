@@ -26,17 +26,15 @@ coverage.html
 # Node (commitlint / tailwind toolchain)
 node_modules/
 
-# Tailwind / htmx outputs are build artifacts. The Go binary embeds them
-# via `//go:embed`, so `just build` re-runs `just web-build` whenever they
-# are missing. CI and the multi-stage Dockerfile do the same.
-/web/static/styles.css
-/web/static/htmx.min.js
-/web/static/copy.js
-/web/static/theme.js
-/web/static/swagger-ui.css
-/web/static/swagger-ui-bundle.js
-/web/static/swagger-ui-standalone-preset.js
-/web/static/redoc.standalone.js
+# Vite + Svelte build output. The Go binary embeds web/dist/ via
+# `//go:embed`, so `just build` re-runs `just web-build` whenever it's
+# missing. CI and the multi-stage Dockerfile do the same.
+/web/dist/
+
+# Vendored OpenAPI docs assets are copied into web/public/static/ at
+# build time by web/scripts/vendor-docs-assets.mjs. They're build
+# artifacts, not source -- the npm registry is the source of truth.
+/web/public/static/
 
 # Release artifacts produced by `just release-binaries`.
 /dist/

@@ -134,18 +134,22 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	})
 	links.Mount(e)
 
-	tmpl, err := web.ParseTemplates()
+	// SPA shell + static assets. The Vite + Svelte build emits
+	// `web/dist/` which is //go:embed'd into the binary; the SPA
+	// then drives the JSON API directly -- no server-side templating
+	// or htmx-style partials remain.
+	indexHTML, err := web.IndexHTML()
 	if err != nil {
-		// Templates ship inside the binary, so a parse failure means
-		// a programming error: fail fast at startup.
-		panic(fmt.Errorf("server: parse web templates: %w", err))
+		// dist/index.html is part of the //go:embed set, so a read
+		// failure means a programming error: fail fast at startup.
+		panic(fmt.Errorf("server: read web index: %w", err))
 	}
-	webH := handlers.NewWeb(handlers.WebConfig{
-		Links:     links,
-		Templates: tmpl,
+	spa := handlers.NewSPA(handlers.SPAConfig{
+		DistFS:    web.DistFS(),
+		IndexHTML: indexHTML,
 		Logger:    logger,
 	})
-	webH.Mount(e, web.Static())
+	spa.Mount(e)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
