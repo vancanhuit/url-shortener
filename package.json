@@ -12,10 +12,5 @@
     "@commitlint/config-conventional": "^21.0.0",
     "@stoplight/spectral-cli": "^6.15.1",
     "husky": "^9.1.7"
-  },
-  "commitlint": {
-    "extends": [
-      "@commitlint/config-conventional"
-    ]
   }
 }
