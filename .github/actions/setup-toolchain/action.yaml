@@ -6,10 +6,10 @@ description: >-
 
 inputs:
   go-version:
-    description: Go toolchain version to install (e.g. 1.26.2).
+    description: Go toolchain version to install (e.g. 1.26.3).
     required: true
   node-version:
-    description: Node.js version to install (e.g. 24.14.1).
+    description: Node.js version to install (e.g. 24.15.0).
     required: true
   go-cache:
     description: >-

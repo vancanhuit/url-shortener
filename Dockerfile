@@ -7,8 +7,8 @@
 # emulate the Go compiler under QEMU. The final image is distroless/static
 # nonroot, which is itself a multi-arch manifest.
 
-ARG GO_VERSION=1.26.2
-ARG NODE_VERSION=24.14.1
+ARG GO_VERSION=1.26.3
+ARG NODE_VERSION=24.15.0
 
 # -----------------------------------------------------------------------------
 # Web-assets stage: compile Tailwind CSS and vendor htmx.min.js.
