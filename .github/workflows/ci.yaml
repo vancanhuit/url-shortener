@@ -23,8 +23,8 @@ concurrency:
 # The workflow exports them so the Justfile picks them up via the
 # matching shell variables when set.
 env:
-  GO_VERSION: 1.26.2
-  NODE_VERSION: 24.14.1
+  GO_VERSION: 1.26.3
+  NODE_VERSION: 24.15.0
   GOLANGCI_LINT_VERSION: 2.11.4
   TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io

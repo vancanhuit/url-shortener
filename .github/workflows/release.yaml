@@ -41,8 +41,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: 1.26.2
-  NODE_VERSION: 24.14.1
+  GO_VERSION: 1.26.3
+  NODE_VERSION: 24.15.0
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   # Opt every JS-based action into the Node 24 runtime ahead of the
