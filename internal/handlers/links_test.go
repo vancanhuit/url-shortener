@@ -30,6 +30,7 @@ type fakeStore struct {
 	mu         sync.Mutex
 	links      map[string]store.Link
 	clicks     map[string]int64 // separate counter so tests can poll without racing on links[]
+	getByCode  int              // counts GetLinkByCode invocations (used to assert cache short-circuit)
 	clickErrs  []error          // queued errors returned by IncrementClicks; popped per call. nil entries pass through to the real bump.
 	clickCalls int              // total IncrementClicks invocations (success + failure), for retry-budget assertions.
 	nextID     int64
@@ -91,6 +92,7 @@ func (f *fakeStore) IncrementClicks(_ context.Context, _ store.DBTX, code string
 func (f *fakeStore) GetLinkByCode(_ context.Context, _ store.DBTX, code string) (store.Link, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.getByCode++
 	if l, ok := f.links[code]; ok {
 		return l, nil
 	}
@@ -609,6 +611,120 @@ func TestRedirect_InvalidCodeReturns404(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// --- Negative caching -------------------------------------------------------
+//
+// The redirect path caches "known dead-end" answers under the same
+// link:<code> key with a sentinel value, so a scanning attack that
+// repeatedly probes the same unknown / deleted / expired codes is
+// absorbed by Redis and never reaches Postgres past the first miss.
+
+// TestRedirect_NegativeCacheHitShortCircuits: a pre-seeded sentinel
+// value must produce a 404 without any GetLinkByCode call against the
+// store. This is the hot path that protects the DB under attack.
+func TestRedirect_NegativeCacheHitShortCircuits(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if err := cc.Set(context.Background(), "link:deadend", "", time.Minute); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	req := httptest.NewRequest(http.MethodGet, "/r/deadend", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if st.getByCode != 0 {
+		t.Errorf("store.GetLinkByCode calls = %d, want 0 (cache must short-circuit)", st.getByCode)
+	}
+}
+
+// TestRedirect_UnknownCodePopulatesNegativeCache: a store miss must
+// write the sentinel under the requested code with NegativeCacheTTL,
+// so a follow-up request resolves entirely from cache.
+func TestRedirect_UnknownCodePopulatesNegativeCache(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	req := httptest.NewRequest(http.MethodGet, "/r/missing", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("first status = %d, want 404", rec.Code)
+	}
+	v, ok := cc.values["link:missing"]
+	if !ok {
+		t.Fatalf("negative cache entry missing")
+	}
+	if v != "" {
+		t.Errorf("negative entry = %q, want empty sentinel", v)
+	}
+	if got := cc.ttls["link:missing"]; got != handlers.NegativeCacheTTL {
+		t.Errorf("negative TTL = %v, want %v", got, handlers.NegativeCacheTTL)
+	}
+
+	before := st.getByCode
+	req2 := httptest.NewRequest(http.MethodGet, "/r/missing", nil)
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusNotFound {
+		t.Errorf("second status = %d, want 404", rec2.Code)
+	}
+	if st.getByCode != before {
+		t.Errorf("second request hit the store: getByCode %d -> %d", before, st.getByCode)
+	}
+}
+
+// TestRedirect_DeletedCodePopulatesNegativeCache: a soft-deleted row
+// is permanent dead-end (the unique code constraint prevents reuse),
+// so the negative entry is also written. Public response stays 410.
+func TestRedirect_DeletedCodePopulatesNegativeCache(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	if _, err := st.CreateLink(context.Background(), nil, "deleted", "https://gone.example", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := st.SoftDeleteLink(context.Background(), nil, "deleted"); err != nil {
+		t.Fatalf("soft-delete: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	req := httptest.NewRequest(http.MethodGet, "/r/deleted", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410", rec.Code)
+	}
+	if v, ok := cc.values["link:deleted"]; !ok || v != "" {
+		t.Errorf("negative entry not written: ok=%v v=%q", ok, v)
+	}
+}
+
+// TestRedirect_ExpiredCodePopulatesNegativeCache: an expired link is
+// also permanent dead-end (we don't un-expire), so the sentinel is
+// written. Public response stays 410.
+func TestRedirect_ExpiredCodePopulatesNegativeCache(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	past := time.Now().Add(-time.Hour)
+	if _, err := st.CreateLink(context.Background(), nil, "expired", "https://old.example", &past); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+	req := httptest.NewRequest(http.MethodGet, "/r/expired", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410", rec.Code)
+	}
+	if v, ok := cc.values["link:expired"]; !ok || v != "" {
+		t.Errorf("negative entry not written: ok=%v v=%q", ok, v)
 	}
 }
 

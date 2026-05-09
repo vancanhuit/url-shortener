@@ -109,6 +109,11 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	// read too. Applies to every route, including the static
 	// asset handler (where bodies are always empty in practice).
 	e.Use(middleware.BodyLimit(maxRequestBodyBytes))
+	// CORS is opt-in via config; no-op when CORSAllowedOrigins is
+	// empty (the default for same-origin SPA + API deployments).
+	if cors := buildCORS(cfg, logger); cors != nil {
+		e.Use(cors)
+	}
 
 	op := handlers.NewOperational()
 	op.AddReadinessCheck("postgres", func(ctx context.Context) error {
@@ -123,8 +128,9 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	// router's mount log.
 	handlers.MountOpenAPI(e)
 
-	// Links API + redirect, plus the HTML web UI (form + recent list)
-	// mounted alongside; both reuse the same underlying *handlers.Links.
+	// Links API + redirect. The optional rate limiter applies only to
+	// the abuse-prone POST /api/v1/links endpoint and is keyed on the
+	// real client IP (already correct via cfg.TrustedProxies above).
 	links := handlers.NewLinks(handlers.LinksConfig{
 		Store:     deps.Store,
 		Cache:     deps.Cache,
@@ -132,7 +138,8 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		BaseURL:   cfg.BaseURL,
 		Logger:    logger,
 	})
-	links.Mount(e)
+	createMW := buildCreateRateLimiter(cfg, logger)
+	links.Mount(e, createMW...)
 
 	// SPA shell + static assets. The Vite + Svelte build emits
 	// `web/dist/` which is //go:embed'd into the binary; the SPA
