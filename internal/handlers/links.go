@@ -37,6 +37,23 @@ const (
 	CreateMaxRetries = 5
 	TargetURLMaxLen  = 2048
 
+	// NegativeCacheTTL bounds how long a "not found / gone" answer
+	// for /r/:code is held in Redis before we re-check Postgres.
+	// Short on purpose: it exists to absorb scanning attacks (a few
+	// thousand misses per second on random codes) without amplifying
+	// load on the DB, not to mask legitimate state changes. A custom
+	// code that 404s now and is created via POST in the next minute
+	// will start resolving as soon as the entry expires; the Persist
+	// path also overwrites the negative entry on success so the
+	// observable lag is normally well under the TTL.
+	NegativeCacheTTL = 30 * time.Second
+
+	// cacheNegativeSentinel is the value stored under link:<code>
+	// to mean "this code is known to be unresolvable". The empty
+	// string is unambiguous: validateTargetURL rejects empty inputs
+	// so a real link never round-trips with this value.
+	cacheNegativeSentinel = ""
+
 	// clickTimeout caps how long a fire-and-forget click increment
 	// goroutine may run. Long enough to absorb a momentary stall on
 	// the database, short enough that a permanently degraded DB
@@ -143,8 +160,13 @@ func NewLinks(cfg LinksConfig) *Links {
 // lives under `/r/:code` (rather than `/:code`) so it can never shadow
 // operational endpoints (`/healthz`, `/readyz`, `/version`) or future
 // top-level routes like `/api`, static assets, or HTML pages.
-func (h *Links) Mount(e *echo.Echo) {
-	e.POST("/api/v1/links", h.Create)
+//
+// createMW are route-scoped middlewares attached only to
+// `POST /api/v1/links` -- the abuse-prone write endpoint. Server.New
+// uses this hook to install the rate limiter when configured; tests
+// usually pass nothing.
+func (h *Links) Mount(e *echo.Echo, createMW ...echo.MiddlewareFunc) {
+	e.POST("/api/v1/links", h.Create, createMW...)
 	e.GET("/api/v1/links", h.List)
 	e.GET("/api/v1/links/:code", h.Get)
 	e.DELETE("/api/v1/links/:code", h.Delete)
@@ -220,6 +242,7 @@ const (
 	ErrCodeLinkExpired     = "link_expired"      // 410 when the link existed but has passed its expires_at.
 	ErrCodeLinkDeleted     = "link_deleted"      // 410 when the link existed but was soft-deleted via DELETE /api/v1/links/:code.
 	ErrCodeInternal        = "internal_error"    // 500 for any other failure.
+	ErrCodeRateLimited     = "rate_limited"      // 429 when a client exceeds the per-IP create budget.
 )
 
 // errResp builds an ErrorResponse with both fields set. Centralized so
@@ -559,13 +582,22 @@ func (h *Links) Redirect(c *echo.Context) error {
 	}
 	ctx := c.Request().Context()
 
-	if target, ok := h.cacheGet(ctx, code); ok {
+	switch target, hit, negative := h.cacheGet(ctx, code); {
+	case hit && negative:
+		// Cached "known dead-end" -- absorbs scanning traffic
+		// without hitting the store. The original status (404 vs
+		// 410) isn't preserved because the public response surface
+		// for both is the same as far as a redirect client is
+		// concerned: there is nothing here to redirect to.
+		return echo.NewHTTPError(http.StatusNotFound, "not found")
+	case hit:
 		h.recordClick(code)
 		return c.Redirect(http.StatusFound, target)
 	}
 
 	link, err := h.store.GetLinkByCode(ctx, nil, code)
 	if errors.Is(err, store.ErrNotFound) {
+		h.cachePutNegative(ctx, code)
 		return echo.NewHTTPError(http.StatusNotFound, "not found")
 	}
 	if err != nil {
@@ -573,9 +605,11 @@ func (h *Links) Redirect(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
 	}
 	if link.IsDeleted() {
+		h.cachePutNegative(ctx, code)
 		return echo.NewHTTPError(http.StatusGone, "link has been deleted")
 	}
 	if link.IsExpired() {
+		h.cachePutNegative(ctx, code)
 		return echo.NewHTTPError(http.StatusGone, "link has expired")
 	}
 
@@ -684,13 +718,33 @@ func (h *Links) WaitForBackgroundTasks(d time.Duration) bool {
 // for redirects but it is an optimisation, not a source of truth, so a
 // transient outage degrades to a store-only round-trip rather than 5xx.
 
-func (h *Links) cacheGet(ctx context.Context, code string) (string, bool) {
+// cacheGet returns the cached redirect target for code. The negative
+// flag is true when the cache holds a sentinel marking the code as
+// known-unresolvable (404 / 410); callers should short-circuit and
+// return 404 in that case without touching the store.
+func (h *Links) cacheGet(ctx context.Context, code string) (target string, hit bool, negative bool) {
 	v, ok, err := h.cache.Get(ctx, cacheKey(code))
 	if err != nil {
 		h.logger.Warn("links: cache get failed", "error", err, "code", code)
-		return "", false
+		return "", false, false
 	}
-	return v, ok
+	if !ok {
+		return "", false, false
+	}
+	if v == cacheNegativeSentinel {
+		return "", true, true
+	}
+	return v, true, false
+}
+
+// cachePutNegative records that code does not resolve, so subsequent
+// requests in the next NegativeCacheTTL window can be answered without
+// a Postgres lookup. Failures are logged and ignored: the negative
+// cache is a defense-in-depth optimization, never a correctness gate.
+func (h *Links) cachePutNegative(ctx context.Context, code string) {
+	if err := h.cache.Set(ctx, cacheKey(code), cacheNegativeSentinel, NegativeCacheTTL); err != nil {
+		h.logger.Warn("links: negative cache set failed", "error", err, "code", code)
+	}
 }
 
 // cachePut stores the link's target under its short-code key with a

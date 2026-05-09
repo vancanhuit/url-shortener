@@ -145,6 +145,14 @@ func TestValidate_RejectsBadDBPoolValues(t *testing.T) {
 		"negative lifetime":  func(c *config.Config) { c.DBMaxConnLifetime = -time.Second },
 		"negative idle":      func(c *config.Config) { c.DBMaxConnIdleTime = -time.Second },
 		"negative healthchk": func(c *config.Config) { c.DBHealthCheckPeriod = -time.Second },
+		"negative rate rps":  func(c *config.Config) { c.RateLimitRPS = -1 },
+		"negative burst":     func(c *config.Config) { c.RateLimitBurst = -1 },
+		"cors origin without scheme": func(c *config.Config) {
+			c.CORSAllowedOrigins = []string{"example.com"}
+		},
+		"cors origin with path": func(c *config.Config) {
+			c.CORSAllowedOrigins = []string{"https://example.com/api"}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

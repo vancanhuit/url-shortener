@@ -82,6 +82,33 @@ type Config struct {
 	TLSCertFile string `mapstructure:"tls_cert_file" json:"tls_cert_file"`
 	TLSKeyFile  string `mapstructure:"tls_key_file"  json:"tls_key_file"`
 
+	// RateLimitRPS, when > 0, enables Echo's in-memory rate limiter on
+	// `POST /api/v1/links`. The value is the steady-state requests-per-
+	// second budget per real client IP (extracted via TrustedProxies
+	// when set). 0 -- the default -- disables rate limiting entirely;
+	// production deployments are expected to set this explicitly
+	// (typical starting point: a handful of req/s for unauthenticated
+	// link creation behind a reverse proxy with its own quotas).
+	RateLimitRPS float64 `mapstructure:"rate_limit_rps"   json:"rate_limit_rps"`
+
+	// RateLimitBurst is the bucket capacity for the rate limiter --
+	// the number of requests a single IP can issue at once before the
+	// token bucket starts gating on RateLimitRPS. 0 means "derive from
+	// RateLimitRPS" (currently 2x the steady-state rate, floored at 1)
+	// so the simple "set just RPS" deployment still works. Ignored
+	// when RateLimitRPS is 0.
+	RateLimitBurst int `mapstructure:"rate_limit_burst" json:"rate_limit_burst"`
+
+	// CORSAllowedOrigins is a comma-separated list of allowed Origin
+	// header values for cross-origin requests. Each entry is matched
+	// exactly (scheme + host + optional port) -- no wildcards on
+	// substrings. The literal "*" is accepted to allow any origin
+	// (in which case browsers will not send credentials, matching
+	// the spec); anything else must parse as an absolute URL.
+	// Empty (the default) leaves CORS off entirely, which is correct
+	// when the SPA and API share an origin.
+	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins" json:"cors_allowed_origins"`
+
 	// TrustedProxies is a comma-separated list of CIDR blocks (parsed by
 	// net.ParseCIDR) whose request peers are trusted to forward client
 	// IP addresses via X-Forwarded-For. When a request's RemoteAddr
@@ -111,6 +138,8 @@ func Load() (Config, error) {
 		"db_max_conn_lifetime", "db_max_conn_idle_time",
 		"db_health_check_period",
 		"tls_cert_file", "tls_key_file", "trusted_proxies",
+		"rate_limit_rps", "rate_limit_burst",
+		"cors_allowed_origins",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -204,6 +233,35 @@ func (c Config) Validate() error {
 	}
 	if c.DBHealthCheckPeriod < 0 {
 		return fmt.Errorf("config: db_health_check_period must be >= 0")
+	}
+
+	// Rate-limit knobs: both must be non-negative. RateLimitBurst
+	// without RateLimitRPS is silently ignored (the middleware is
+	// only installed when RPS > 0), but a negative value is still a
+	// clear misconfiguration -- refuse it.
+	if c.RateLimitRPS < 0 {
+		return fmt.Errorf("config: rate_limit_rps must be >= 0")
+	}
+	if c.RateLimitBurst < 0 {
+		return fmt.Errorf("config: rate_limit_burst must be >= 0")
+	}
+
+	// CORS origins: each entry must be either the literal "*" or an
+	// absolute URL with scheme + host (no path, no query). Reject
+	// anything else early -- a typo like `example.com` (without
+	// scheme) silently never matches a real Origin header at
+	// runtime, which is a confusing failure mode in production.
+	for _, origin := range c.CORSAllowedOrigins {
+		if origin == "" {
+			continue
+		}
+		if origin == "*" {
+			continue
+		}
+		u, err := url.Parse(origin)
+		if err != nil || u.Scheme == "" || u.Host == "" || u.Path != "" || u.RawQuery != "" {
+			return fmt.Errorf("config: cors_allowed_origins entry %q must be \"*\" or an absolute scheme://host[:port] URL", origin)
+		}
 	}
 
 	// TLS cert + key are paired -- one without the other is almost

@@ -193,6 +193,19 @@ paths:
               example:
                 error: target_url must use http or https
                 code: validation_failed
+        '429':
+          description: |
+            Per-IP create budget exceeded. Only emitted when the
+            server has rate limiting enabled
+            (`URL_SHORTENER_RATE_LIMIT_RPS > 0`); deployments fronted
+            by an upstream rate limiter typically leave this off.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: rate limit exceeded
+                code: rate_limited
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -563,6 +576,7 @@ components:
             - not_found
             - link_expired
             - link_deleted
+            - rate_limited
             - internal_error
           example: code_taken
 
