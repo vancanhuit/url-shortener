@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os/signal"
 	"syscall"
 
@@ -38,6 +39,18 @@ func newRunCmd() *cobra.Command {
 				logger.Info("auto_migrate=true; applying migrations before serving")
 				if err := migrate.Up(cmd.Context(), cfg.DatabaseURL); err != nil {
 					return err
+				}
+			} else {
+				current, latest, err := migrate.Versions(cmd.Context(), cfg.DatabaseURL)
+				if err != nil {
+					return err
+				}
+				if current < latest {
+					return fmt.Errorf(
+						"database schema is behind embedded migrations (current=%d latest=%d); run `url-shortener migrate up` or set URL_SHORTENER_AUTO_MIGRATE=true",
+						current,
+						latest,
+					)
 				}
 			}
 			st, err := store.NewWithPool(cmd.Context(), cfg.DatabaseURL, store.PoolConfig{

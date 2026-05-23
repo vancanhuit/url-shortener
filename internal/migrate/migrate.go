@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -42,6 +44,53 @@ func Status(ctx context.Context, databaseURL string) error {
 	return run(ctx, databaseURL, func(db *sql.DB) error {
 		return goose.StatusContext(ctx, db, migrationsDir)
 	})
+}
+
+// Versions returns the current goose_db_version in the target database and
+// the latest embedded migration version.
+func Versions(ctx context.Context, databaseURL string) (current int64, latest int64, err error) {
+	latest, err = latestEmbeddedVersion()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	err = run(ctx, databaseURL, func(db *sql.DB) error {
+		v, e := goose.EnsureDBVersionContext(ctx, db)
+		if e != nil {
+			return e
+		}
+		current = v
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return current, latest, nil
+}
+
+func latestEmbeddedVersion() (int64, error) {
+	entries, err := fs.ReadDir(migrations.FS, migrationsDir)
+	if err != nil {
+		return 0, fmt.Errorf("migrate: read embedded migrations: %w", err)
+	}
+
+	var latest int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		version, err := goose.NumericComponent(e.Name())
+		if err != nil {
+			return 0, fmt.Errorf("migrate: parse migration version %q: %w", e.Name(), err)
+		}
+		if version > latest {
+			latest = version
+		}
+	}
+	if latest == 0 {
+		return 0, goose.ErrNoMigrationFiles
+	}
+	return latest, nil
 }
 
 // run opens a pgx pool, adapts it to *sql.DB for goose, configures goose with
