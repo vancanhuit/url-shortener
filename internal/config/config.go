@@ -118,6 +118,14 @@ type Config struct {
 	// equivalent to "no proxy in front". Set this to e.g.
 	// `127.0.0.1/32,10.0.0.0/8` when running behind a reverse proxy.
 	TrustedProxies []string `mapstructure:"trusted_proxies" json:"trusted_proxies"`
+
+	// CacheTTL is how long a positive redirect lookup is cached in
+	// Redis. 0 uses the handler default (1 hour).
+	CacheTTL time.Duration `mapstructure:"cache_ttl" json:"cache_ttl"`
+
+	// NegativeCacheTTL is how long a "not found / gone" answer for
+	// /r/:code is held in Redis. 0 uses the handler default (30s).
+	NegativeCacheTTL time.Duration `mapstructure:"negative_cache_ttl" json:"negative_cache_ttl"`
 }
 
 // Load reads the configuration from environment variables and applies the
@@ -140,6 +148,7 @@ func Load() (Config, error) {
 		"tls_cert_file", "tls_key_file", "trusted_proxies",
 		"rate_limit_rps", "rate_limit_burst",
 		"cors_allowed_origins",
+		"cache_ttl", "negative_cache_ttl",
 	} {
 		_ = v.BindEnv(key)
 	}
