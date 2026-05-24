@@ -238,15 +238,7 @@ const baseURL = "https://short.test"
 
 func newHandlerWithCache(t *testing.T, st handlers.LinkStore, cc handlers.LinkCache, gen handlers.Generator) (*echo.Echo, *handlers.Links) {
 	t.Helper()
-	h := handlers.NewLinks(handlers.LinksConfig{
-		Store:     st,
-		Cache:     cc,
-		Generator: gen,
-		BaseURL:   baseURL,
-	})
-	e := echo.New()
-	h.Mount(e)
-	return e, h
+	return newHandlerWithTTLs(t, st, cc, gen, 0, 0)
 }
 
 func newHandlerWithTTLs(
