@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os/signal"
 	"syscall"
 
@@ -13,6 +14,33 @@ import (
 	"github.com/vancanhuit/url-shortener/internal/shortener"
 	"github.com/vancanhuit/url-shortener/internal/store"
 )
+
+var (
+	migrateUpFn       = migrate.Up
+	migrateVersionsFn = migrate.Versions
+)
+
+func ensureSchemaCurrent(cmd *cobra.Command, cfg config.Config) error {
+	if cfg.AutoMigrate {
+		if err := migrateUpFn(cmd.Context(), cfg.DatabaseURL); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	current, latest, err := migrateVersionsFn(cmd.Context(), cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	if current < latest {
+		return fmt.Errorf(
+			"database schema is behind embedded migrations (current=%d latest=%d); run `url-shortener migrate up` or set URL_SHORTENER_AUTO_MIGRATE=true",
+			current,
+			latest,
+		)
+	}
+	return nil
+}
 
 func newRunCmd() *cobra.Command {
 	return &cobra.Command{
@@ -36,9 +64,9 @@ func newRunCmd() *cobra.Command {
 			// config.Validate); DatabaseURL is guaranteed non-empty here.
 			if cfg.AutoMigrate {
 				logger.Info("auto_migrate=true; applying migrations before serving")
-				if err := migrate.Up(cmd.Context(), cfg.DatabaseURL); err != nil {
-					return err
-				}
+			}
+			if err := ensureSchemaCurrent(cmd, cfg); err != nil {
+				return err
 			}
 			st, err := store.NewWithPool(cmd.Context(), cfg.DatabaseURL, store.PoolConfig{
 				MaxConns:          cfg.DBMaxConns,

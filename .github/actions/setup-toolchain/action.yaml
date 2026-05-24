@@ -41,3 +41,9 @@ runs:
         cache-dependency-path: ${{ inputs.node-cache-dependency-path }}
 
     - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      with:
+        # setup-just resolves public releases from casey/just.
+        # Avoid forwarding the workflow token here: for PR contexts,
+        # the injected token can be scoped or invalid for that cross-repo
+        # lookup and has intermittently produced 401 Bad credentials.
+        github-token: ""
