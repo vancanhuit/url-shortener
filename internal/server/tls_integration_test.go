@@ -175,8 +175,11 @@ func tlsPeerSerial(addr string) (string, error) {
 func TestServer_TLSListenerServesHTTPS(t *testing.T) {
 	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
 	redisURL := os.Getenv("URL_SHORTENER_TEST_REDIS_URL")
-	if dbURL == "" || redisURL == "" {
-		t.Skip("URL_SHORTENER_TEST_DATABASE_URL / URL_SHORTENER_TEST_REDIS_URL not set; skipping integration test")
+	if dbURL == "" {
+		t.Fatal("URL_SHORTENER_TEST_DATABASE_URL must be set to run integration tests")
+	}
+	if redisURL == "" {
+		t.Fatal("URL_SHORTENER_TEST_REDIS_URL must be set to run integration tests")
 	}
 
 	certPath, keyPath := generateSelfSignedCert(t, t.TempDir())
@@ -295,8 +298,11 @@ func TestServer_TLSListenerServesHTTPS(t *testing.T) {
 func TestServer_TLSCertHotReloadWithoutRestart(t *testing.T) {
 	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
 	redisURL := os.Getenv("URL_SHORTENER_TEST_REDIS_URL")
-	if dbURL == "" || redisURL == "" {
-		t.Skip("URL_SHORTENER_TEST_DATABASE_URL / URL_SHORTENER_TEST_REDIS_URL not set; skipping integration test")
+	if dbURL == "" {
+		t.Fatal("URL_SHORTENER_TEST_DATABASE_URL must be set to run integration tests")
+	}
+	if redisURL == "" {
+		t.Fatal("URL_SHORTENER_TEST_REDIS_URL must be set to run integration tests")
 	}
 
 	certPath, keyPath := generateSelfSignedCert(t, t.TempDir())

@@ -53,11 +53,11 @@ func startFullServerWithDeps(t *testing.T) (string, *store.Store, *cache.Client,
 
 	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
 	if dbURL == "" {
-		t.Skip("URL_SHORTENER_TEST_DATABASE_URL not set; skipping integration test")
+		t.Fatal("URL_SHORTENER_TEST_DATABASE_URL must be set to run integration tests")
 	}
 	redisURL := os.Getenv("URL_SHORTENER_TEST_REDIS_URL")
 	if redisURL == "" {
-		t.Skip("URL_SHORTENER_TEST_REDIS_URL not set; skipping integration test")
+		t.Fatal("URL_SHORTENER_TEST_REDIS_URL must be set to run integration tests")
 	}
 
 	ctx := t.Context()
@@ -383,11 +383,11 @@ func TestLinksAPI_UnknownCodeReturns404(t *testing.T) {
 func TestServer_GracefulShutdownDrainsBackgroundTasks(t *testing.T) {
 	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
 	if dbURL == "" {
-		t.Skip("URL_SHORTENER_TEST_DATABASE_URL not set; skipping integration test")
+		t.Fatal("URL_SHORTENER_TEST_DATABASE_URL must be set to run integration tests")
 	}
 	redisURL := os.Getenv("URL_SHORTENER_TEST_REDIS_URL")
 	if redisURL == "" {
-		t.Skip("URL_SHORTENER_TEST_REDIS_URL not set; skipping integration test")
+		t.Fatal("URL_SHORTENER_TEST_REDIS_URL must be set to run integration tests")
 	}
 
 	ctx := t.Context()
