@@ -36,7 +36,7 @@ func TestGenerate_ProducesCodesOfTheRequestedLengthAndAlphabet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
-	for i := 0; i < 256; i++ {
+	for range 256 {
 		code, err := g.Generate()
 		if err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -62,7 +62,7 @@ func TestGenerate_ProducesDistinctCodesAcrossManyDraws(t *testing.T) {
 	}
 	const draws = 1024
 	seen := make(map[string]struct{}, draws)
-	for i := 0; i < draws; i++ {
+	for i := range draws {
 		code, err := g.Generate()
 		if err != nil {
 			t.Fatalf("Generate: %v", err)

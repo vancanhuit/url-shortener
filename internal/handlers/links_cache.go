@@ -84,15 +84,13 @@ func cacheKey(code string) string { return "link:" + code }
 // inside the goroutine; non-transient errors and exhausted budgets
 // are logged and dropped, since the click counter is best-effort.
 func (h *Links) recordClick(code string) {
-	h.bgWG.Add(1)
-	go func() {
-		defer h.bgWG.Done()
+	h.bgWG.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
 		defer cancel()
 		if err := h.incrementClicksWithRetry(ctx, code); err != nil {
 			h.logger.Warn("links: increment clicks failed", "error", err, "code", code)
 		}
-	}()
+	})
 }
 
 // incrementClicksWithRetry calls store.IncrementClicks with bounded

@@ -52,10 +52,7 @@ func buildCreateRateLimiter(cfg config.Config, rl rateLimiter, logger *slog.Logg
 		// "create" a couple of times in a row stays inside the
 		// budget. Floor at 1 so a fractional RPS like 0.5 still
 		// admits at least one request.
-		burst = int(cfg.RateLimitRPS * 2)
-		if burst < 1 {
-			burst = 1
-		}
+		burst = max(int(cfg.RateLimitRPS*2), 1)
 	}
 
 	// Fixed window of 1 second: `burst` requests per second per IP.
