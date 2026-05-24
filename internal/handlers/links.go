@@ -579,7 +579,7 @@ func (h *Links) Delete(c *echo.Context) error {
 func (h *Links) Redirect(c *echo.Context) error {
 	code := c.Param("code")
 	if !shortener.ValidCode(code) {
-		return echo.NewHTTPError(http.StatusNotFound, "not found")
+		return c.JSON(http.StatusNotFound, errResp(ErrCodeNotFound, "not found"))
 	}
 	ctx := c.Request().Context()
 
@@ -590,7 +590,7 @@ func (h *Links) Redirect(c *echo.Context) error {
 		// 410) isn't preserved because the public response surface
 		// for both is the same as far as a redirect client is
 		// concerned: there is nothing here to redirect to.
-		return echo.NewHTTPError(http.StatusNotFound, "not found")
+		return c.JSON(http.StatusNotFound, errResp(ErrCodeNotFound, "not found"))
 	case hit:
 		h.recordClick(code)
 		return c.Redirect(http.StatusFound, target)
@@ -599,19 +599,19 @@ func (h *Links) Redirect(c *echo.Context) error {
 	link, err := h.store.GetLinkByCode(ctx, nil, code)
 	if errors.Is(err, store.ErrNotFound) {
 		h.cachePutNegative(ctx, code)
-		return echo.NewHTTPError(http.StatusNotFound, "not found")
+		return c.JSON(http.StatusNotFound, errResp(ErrCodeNotFound, "not found"))
 	}
 	if err != nil {
 		h.logger.Error("links: redirect lookup failed", "error", err, "code", code)
-		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
+		return c.JSON(http.StatusInternalServerError, errResp(ErrCodeInternal, "internal error"))
 	}
 	if link.IsDeleted() {
 		h.cachePutNegative(ctx, code)
-		return echo.NewHTTPError(http.StatusGone, "link has been deleted")
+		return c.JSON(http.StatusGone, errResp(ErrCodeLinkDeleted, "link has been deleted"))
 	}
 	if link.IsExpired() {
 		h.cachePutNegative(ctx, code)
-		return echo.NewHTTPError(http.StatusGone, "link has expired")
+		return c.JSON(http.StatusGone, errResp(ErrCodeLinkExpired, "link has expired"))
 	}
 
 	h.cachePut(ctx, link)
