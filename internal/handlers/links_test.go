@@ -89,6 +89,12 @@ func (f *fakeStore) IncrementClicks(_ context.Context, _ store.DBTX, code string
 	return nil
 }
 
+// GetLinkByCode returns the stored link regardless of expiry or deletion,
+// mirroring the production store which also returns any row (even
+// soft-deleted or expired ones). The handler is responsible for calling
+// link.IsExpired() / link.IsDeleted() and mapping those to 410 Gone.
+// Contrast with ListLinks below, which filters both conditions at the
+// store level matching the SQL WHERE clause.
 func (f *fakeStore) GetLinkByCode(_ context.Context, _ store.DBTX, code string) (store.Link, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
