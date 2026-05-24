@@ -801,6 +801,92 @@ func TestRedirect_ExpiredLinkReturns410(t *testing.T) {
 	}
 }
 
+// TestRedirect_ErrorsUseErrorResponseSchema verifies that 4xx/5xx
+// responses from the redirect handler use the same
+// {"error":"...","code":"..."} JSON shape as every other handler,
+// rather than Echo's default {"message":"..."} envelope.
+func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
+	t.Parallel()
+
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(time.Hour)
+
+	cases := []struct {
+		name      string
+		path      string
+		seed      func(*fakeStore)
+		wantCode  int
+		wantECode string
+	}{
+		{
+			name:      "unknown code returns not_found",
+			path:      "/r/missing1",
+			wantCode:  http.StatusNotFound,
+			wantECode: handlers.ErrCodeNotFound,
+		},
+		{
+			name: "deleted link returns link_deleted",
+			path: "/r/deldlink",
+			seed: func(st *fakeStore) {
+				_, _ = st.CreateLink(context.Background(), nil, "deldlink", "https://del.example", nil)
+				_ = st.SoftDeleteLink(context.Background(), nil, "deldlink")
+			},
+			wantCode:  http.StatusGone,
+			wantECode: handlers.ErrCodeLinkDeleted,
+		},
+		{
+			name: "expired link returns link_expired",
+			path: "/r/exprlnk",
+			seed: func(st *fakeStore) {
+				_, _ = st.CreateLink(context.Background(), nil, "exprlnk", "https://exp.example", &past)
+			},
+			wantCode:  http.StatusGone,
+			wantECode: handlers.ErrCodeLinkExpired,
+		},
+		{
+			name: "negative cache hit returns not_found",
+			path: "/r/ncached",
+			seed: func(st *fakeStore) {
+				// Prime a future-expiry link so it exists in the store,
+				// then seed the negative-cache sentinel to short-circuit.
+				_, _ = st.CreateLink(context.Background(), nil, "ncached", "https://nc.example", &future)
+			},
+			wantCode:  http.StatusNotFound,
+			wantECode: handlers.ErrCodeNotFound,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			st, cc := newFakeStore(), newFakeCache()
+			if tc.seed != nil {
+				tc.seed(st)
+			}
+			// For the negative-cache case, manually seed the sentinel.
+			if tc.wantECode == handlers.ErrCodeNotFound && tc.name == "negative cache hit returns not_found" {
+				_ = cc.Set(context.Background(), "link:ncached", "", time.Minute)
+			}
+			e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantCode)
+			}
+			got := decodeError(t, rec.Body.Bytes())
+			if got.Code != tc.wantECode {
+				t.Errorf("error code = %q, want %q", got.Code, tc.wantECode)
+			}
+			if got.Error == "" {
+				t.Errorf("error message is empty")
+			}
+		})
+	}
+}
+
 // TestGet_ExpiredLinkReturns410: same shape as the redirect, exposed
 // via the JSON API so a programmatic client can distinguish a
 // once-valid code from an unknown one.
