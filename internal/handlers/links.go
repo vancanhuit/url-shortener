@@ -116,7 +116,6 @@ type Links struct {
 	logger      *slog.Logger
 	cacheTTL    time.Duration
 	negCacheTTL time.Duration
-	retries     int
 
 	// bgWG tracks fire-and-forget goroutines (currently just the
 	// click-increment background work). Tests use
@@ -163,7 +162,6 @@ func NewLinks(cfg LinksConfig) *Links {
 		logger:      logger,
 		cacheTTL:    cacheTTL,
 		negCacheTTL: negCacheTTL,
-		retries:     CreateMaxRetries,
 	}
 }
 
