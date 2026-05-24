@@ -88,13 +88,13 @@ func TestMountOpenAPI(t *testing.T) {
 	// references the right asset) -- the bundles themselves are
 	// vendored npm artifacts and not the test's job to validate.
 	htmlCases := []struct {
-		name        string
-		path        string
-		wantTitle   string
-		wantAsset   string
-		wantSpecRef string
+		name      string
+		path      string
+		wantTitle string
+		wantAsset string
+		wantRef   string
 	}{
-		{"swagger-ui", "/api/v1/docs", "Swagger UI", "/static/swagger-ui-bundle.js", "./openapi.json"},
+		{"swagger-ui", "/api/v1/docs", "Swagger UI", "/static/swagger-ui-bundle.js", "/swagger-ui-init.js"},
 		{"redoc", "/api/v1/redoc", "Redoc", "/static/redoc.standalone.js", "./openapi.json"},
 	}
 	for _, tc := range htmlCases {
@@ -118,8 +118,8 @@ func TestMountOpenAPI(t *testing.T) {
 			if !strings.Contains(body, tc.wantAsset) {
 				t.Errorf("body does not reference vendored asset %q", tc.wantAsset)
 			}
-			if !strings.Contains(body, tc.wantSpecRef) {
-				t.Errorf("body does not reference spec at %q", tc.wantSpecRef)
+			if !strings.Contains(body, tc.wantRef) {
+				t.Errorf("body does not contain expected reference %q", tc.wantRef)
 			}
 		})
 	}

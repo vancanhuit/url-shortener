@@ -67,27 +67,12 @@ var swaggerUIHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>url-shortener API -- Swagger UI</title>
   <link rel="stylesheet" href="/static/swagger-ui.css">
-  <style>body { margin: 0; }</style>
 </head>
-<body>
+<body style="margin:0">
   <div id="swagger-ui"></div>
   <script src="/static/swagger-ui-bundle.js" crossorigin></script>
   <script src="/static/swagger-ui-standalone-preset.js" crossorigin></script>
-  <script>
-    window.addEventListener("load", function () {
-      window.ui = SwaggerUIBundle({
-        url: "./openapi.json",
-        dom_id: "#swagger-ui",
-        deepLinking: true,
-        tryItOutEnabled: true,
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIStandalonePreset
-        ],
-        layout: "StandaloneLayout"
-      });
-    });
-  </script>
+  <script src="/swagger-ui-init.js" crossorigin></script>
 </body>
 </html>
 `
