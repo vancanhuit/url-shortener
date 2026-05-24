@@ -358,15 +358,15 @@ func TestValidate_TLSAndTrustedProxies(t *testing.T) {
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, kv := range os.Environ() {
-		i := strings.IndexByte(kv, '=')
-		if i < 0 {
+		before, after, ok := strings.Cut(kv, "=")
+		if !ok {
 			continue
 		}
-		k := kv[:i]
+		k := before
 		if !strings.HasPrefix(k, config.EnvPrefix+"_") {
 			continue
 		}
-		orig := kv[i+1:]
+		orig := after
 		if err := os.Unsetenv(k); err != nil {
 			t.Fatalf("Unsetenv(%q): %v", k, err)
 		}

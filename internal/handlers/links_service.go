@@ -147,7 +147,7 @@ func (h *Links) listPage(ctx context.Context, pageSize int, beforeID int64) ([]s
 // Returns (link, true, nil) when a fresh row is inserted and
 // (link, false, nil) when an existing permanent row is reused.
 func (h *Links) createOrReuseAutoLink(ctx context.Context, target string) (store.Link, bool, error) {
-	for i := 0; i < CreateMaxRetries; i++ {
+	for i := range CreateMaxRetries {
 		code, err := h.gen.Generate()
 		if err != nil {
 			return store.Link{}, false, fmt.Errorf("generate code: %w", err)
@@ -170,7 +170,7 @@ func (h *Links) createOrReuseAutoLink(ctx context.Context, target string) (store
 // implies either an exhausted keyspace or a degenerate generator and
 // should surface as a 500.
 func (h *Links) createWithRandomCode(ctx context.Context, target string, expiresAt *time.Time) (store.Link, error) {
-	for i := 0; i < CreateMaxRetries; i++ {
+	for i := range CreateMaxRetries {
 		code, err := h.gen.Generate()
 		if err != nil {
 			return store.Link{}, fmt.Errorf("generate code: %w", err)

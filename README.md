@@ -81,9 +81,9 @@ just test-integration                  # bring up test-profile infra, migrate, r
 just lint                              # run golangci-lint (auto-installs the pinned version)
 just govulncheck                       # run govulncheck against the latest Go vuln database
 just trivy-image                              # build the Docker image and scan it with Trivy (HIGH/CRITICAL)
-docker compose --profile=dev up --wait -d     # bring up the full local dev stack (db + redis + server on 5432/6379/8080)
+just up -d --build --wait                     # bring up the full local dev stack (db + redis + server on 5432/6379/8080), git metadata injected
 just compose-smoke                            # smoke-check a running stack: operational endpoints + shorten/redirect cycle
-docker compose --profile=dev down -v          # tear down the dev stack
+just down -v                                  # tear down the dev stack
 docker compose --profile=test down -v         # tear down the test-profile stack (db-test + redis-test on 5433/6380)
 ```
 
@@ -144,8 +144,8 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_TLS_CERT_FILE`  | _(empty)_                     | Path to a PEM-encoded server certificate. When set together with `URL_SHORTENER_TLS_KEY_FILE`, the server speaks HTTPS on `URL_SHORTENER_ADDR`; otherwise it stays on plain HTTP (the right choice when fronted by a TLS-terminating reverse proxy). Both must be set together -- one without the other is a startup error. See [Deployment](#deployment). |
 | `URL_SHORTENER_TLS_KEY_FILE`   | _(empty)_                     | Path to the PEM-encoded private key matching `URL_SHORTENER_TLS_CERT_FILE`. |
 | `URL_SHORTENER_TRUSTED_PROXIES` | _(empty)_                    | Comma-separated CIDR list (e.g. `127.0.0.1/32,10.0.0.0/8`). When a request's `RemoteAddr` falls inside one of these ranges the server walks `X-Forwarded-For` to find the original client IP; otherwise XFF is ignored. Empty leaves no proxy trust configured -- safe default for direct-to-internet deployments. See [Reverse-proxy deployment (Caddy)](#reverse-proxy-deployment-caddy). |
-| `URL_SHORTENER_RATE_LIMIT_RPS` | `0`                           | When `> 0`, enables an in-memory per-IP rate limiter on `POST /api/v1/links` at the given steady-state requests-per-second budget. `0` (the default) disables rate limiting; deployments fronted by an upstream limiter typically leave this off. Per-IP keying uses `URL_SHORTENER_TRUSTED_PROXIES` for XFF resolution. |
-| `URL_SHORTENER_RATE_LIMIT_BURST` | _(2 &times; RPS, min 1)_    | Token-bucket capacity for the rate limiter. `0` means "derive from `URL_SHORTENER_RATE_LIMIT_RPS`". Ignored when `RATE_LIMIT_RPS=0`. |
+| `URL_SHORTENER_RATE_LIMIT_RPS` | `0`                           | When `> 0`, enables a **Redis-backed fixed-window per-IP rate limiter** on `POST /api/v1/links` at the given requests-per-second budget. `0` (the default) disables rate limiting. Enforced consistently across all replicas because the counter lives in Redis. Per-IP keying uses `URL_SHORTENER_TRUSTED_PROXIES` for XFF resolution. Fails open: a Redis error lets the request through and logs a warning. |
+| `URL_SHORTENER_RATE_LIMIT_BURST` | _(2 &times; RPS, min 1)_    | Window capacity for the rate limiter (`burst` requests per 1-second window). `0` means "derive from `URL_SHORTENER_RATE_LIMIT_RPS`". Ignored when `RATE_LIMIT_RPS=0`. |
 | `URL_SHORTENER_CORS_ALLOWED_ORIGINS` | _(empty)_               | Comma-separated allow-list of cross-origin browser callers (e.g. `https://app.example.com,https://status.example.com`). Each entry must be `*` or an absolute `scheme://host[:port]` URL -- typos like `example.com` (no scheme) are rejected at startup. Empty (the default) leaves CORS off, which is correct for the same-origin SPA + API deployment this project ships. |
 | `URL_SHORTENER_CACHE_TTL`            | `1h`                    | How long a positive redirect lookup is cached in Redis. Accepts Go duration syntax (e.g. `30m`, `2h`). `0` uses the default. |
 | `URL_SHORTENER_NEGATIVE_CACHE_TTL`   | `30s`                   | How long a "not found / gone" answer for `/r/:code` is held in Redis before re-checking Postgres. Short on purpose: absorbs scanning attacks without masking legitimate state changes. Accepts Go duration syntax. `0` uses the default. |
@@ -165,11 +165,18 @@ whether TLS is in use:
 
 | Header | Value |
 | ------ | ----- |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'` |
 | `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `SAMEORIGIN` |
 | `X-XSS-Protection` | `1; mode=block` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` (HTTPS requests only) |
+
+`script-src 'self'` is kept strict (no `unsafe-inline`) because the two
+inline scripts that shipped in the original HTML have been extracted to
+external files (`/theme-init.js`, `/swagger-ui-init.js`) served from the
+same origin. `style-src` allows `unsafe-inline` because Swagger UI and
+Redoc inject inline styles via React at runtime.
 
 HSTS is only emitted when the request arrives over TLS (direct or via a
 proxy that sets `X-Forwarded-Proto: https`), so plain-HTTP deployments
@@ -297,6 +304,8 @@ already present elsewhere -- two codes can legitimately point at the same
 destination. Dedup is best-effort under concurrent writes (no unique
 constraint on `target_url`).
 
+Dedup is **atomic**: the store uses a single `INSERT … ON CONFLICT (target_url) … DO UPDATE … RETURNING` round-trip backed by a partial unique index on `(target_url) WHERE auto_dedup = true AND expires_at IS NULL AND deleted_at IS NULL`. Concurrent replicas that receive the same target URL simultaneously will both attempt the upsert; exactly one wins the insert and the other receives the existing row. No separate SELECT is needed and no TOCTOU window exists.
+
 Dedup is also suppressed whenever expiry is involved on either side: a
 request carrying `expires_at` always mints a fresh code (so an
 ephemeral request never silently extends a permanent row's lifetime),
@@ -385,9 +394,9 @@ distroless container and exposes the app on `:8443`:
 
 ```sh
 just dev-certs                                  # one-time per host
-docker compose --profile=tls up --wait -d
+just up-tls -d --build --wait
 curl https://localhost:8443/healthz             # {"status":"ok"}
-docker compose --profile=tls down -v
+just down-tls -v
 ```
 
 The `tls` profile shares the `db` and `redis` services with `dev` (it

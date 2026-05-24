@@ -980,7 +980,7 @@ func TestRedirect_IncrementsClickCount(t *testing.T) {
 	}
 	e, h := newHandlerWithCache(t, st, cc, &scriptedGen{})
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req := httptest.NewRequest(http.MethodGet, "/r/tracked", nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
@@ -1308,7 +1308,7 @@ func TestList_DefaultsTo10NewestFirstWithCursorWhenMore(t *testing.T) {
 	t.Parallel()
 	st, cc := newFakeStore(), newFakeCache()
 	// Seed 12 links so the default page-size of 10 returns 10 + a cursor.
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		code := fmt.Sprintf("code%03d", i)
 		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -1336,7 +1336,7 @@ func TestList_DefaultsTo10NewestFirstWithCursorWhenMore(t *testing.T) {
 func TestList_BeforeCursorWalksOlderRows(t *testing.T) {
 	t.Parallel()
 	st, cc := newFakeStore(), newFakeCache()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		code := fmt.Sprintf("walk%03d", i)
 		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -1371,7 +1371,7 @@ func TestList_BeforeCursorWalksOlderRows(t *testing.T) {
 func TestList_LimitClampedToMax(t *testing.T) {
 	t.Parallel()
 	st, cc := newFakeStore(), newFakeCache()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		code := fmt.Sprintf("clamp%02d", i)
 		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -1394,7 +1394,7 @@ func TestList_LimitClampedToMax(t *testing.T) {
 func TestList_BadLimitFallsBackToDefault(t *testing.T) {
 	t.Parallel()
 	st, cc := newFakeStore(), newFakeCache()
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		code := fmt.Sprintf("bad%04d", i)
 		if _, err := st.CreateLink(context.Background(), nil, code, fmt.Sprintf("https://example.com/%d", i), nil); err != nil {
 			t.Fatalf("seed: %v", err)
