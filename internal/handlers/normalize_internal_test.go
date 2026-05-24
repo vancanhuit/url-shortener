@@ -68,3 +68,87 @@ func TestNormalizeURL(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPrivateHost(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		host    string
+		private bool
+	}{
+		// Public IPs — must pass
+		{"93.184.216.34", false},                          // example.com
+		{"2606:2800:21f:cb07:6820:80da:af6b:8b2c", false}, // example.com IPv6
+		{"93.184.216.34:80", false},                       // with port
+		{"example.com", false},                            // plain hostname
+
+		// localhost by name
+		{"localhost", true},
+		{"LOCALHOST", true},
+		{"localhost:8080", true},
+
+		// IPv4 loopback
+		{"127.0.0.1", true},
+		{"127.255.255.255", true},
+		{"127.0.0.1:5432", true},
+
+		// IPv6 loopback
+		{"::1", true},
+		{"[::1]", true},
+		{"[::1]:443", true},
+
+		// RFC 1918 private
+		{"10.0.0.1", true},
+		{"10.255.255.255", true},
+		{"172.16.0.1", true},
+		{"172.31.255.255", true},
+		{"192.168.1.1", true},
+		{"192.168.255.255", true},
+
+		// Link-local (AWS IMDS etc.)
+		{"169.254.169.254", true},
+		{"169.254.0.1", true},
+
+		// IPv6 link-local
+		{"fe80::1", true},
+
+		// IPv6 unique-local
+		{"fd00::1", true},
+		{"fc00::1", true},
+
+		// Carrier-grade NAT
+		{"100.64.0.1", true},
+		{"100.127.255.255", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			t.Parallel()
+			if got := isPrivateHost(tc.host); got != tc.private {
+				t.Errorf("isPrivateHost(%q) = %v, want %v", tc.host, got, tc.private)
+			}
+		})
+	}
+}
+
+func TestValidateTargetURL_RejectsPrivateHosts(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"http://localhost/",
+		"http://127.0.0.1/",
+		"http://127.0.0.1:8080/admin",
+		"https://[::1]/",
+		"http://10.0.0.1/",
+		"http://172.16.0.1/",
+		"http://192.168.1.1/",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://100.64.0.1/",
+		"http://fd00::1/",
+	}
+	for _, target := range cases {
+		t.Run(target, func(t *testing.T) {
+			t.Parallel()
+			if err := validateTargetURL(target); err == nil {
+				t.Errorf("validateTargetURL(%q) = nil, want error", target)
+			}
+		})
+	}
+}

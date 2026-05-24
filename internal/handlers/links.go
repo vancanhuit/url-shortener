@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -834,8 +835,65 @@ func normalizeURL(target string) (string, error) {
 	return u.String(), nil
 }
 
+// privateRanges holds the CIDR blocks that must never appear as redirect
+// targets: loopback, RFC-1918 private, link-local, carrier-grade NAT, and
+// IPv6 unique-local. Initialized once at package load via an init-style
+// variable so the parse cost is paid only once.
+var privateRanges = func() []*net.IPNet {
+	cidrs := []string{
+		"127.0.0.0/8",    // IPv4 loopback
+		"::1/128",        // IPv6 loopback
+		"10.0.0.0/8",     // RFC 1918
+		"172.16.0.0/12",  // RFC 1918
+		"192.168.0.0/16", // RFC 1918
+		"169.254.0.0/16", // IPv4 link-local (APIPA / AWS IMDS)
+		"fe80::/10",      // IPv6 link-local
+		"fc00::/7",       // IPv6 unique-local (fd00::/8 is a subset)
+		"100.64.0.0/10",  // Carrier-grade NAT (RFC 6598)
+		"0.0.0.0/8",      // "This" network
+		"240.0.0.0/4",    // Reserved
+	}
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		_, ipnet, _ := net.ParseCIDR(cidr)
+		out = append(out, ipnet)
+	}
+	return out
+}()
+
+// isPrivateHost reports whether the host component of a URL (including any
+// optional port) resolves to an address that must not be used as a redirect
+// target. It blocks IP literals in private/loopback/link-local ranges and
+// the bare hostname "localhost". DNS resolution is intentionally avoided:
+// it would add per-request latency and is vulnerable to DNS rebinding; any
+// attack that requires a custom hostname is out of scope for this check.
+func isPrivateHost(host string) bool {
+	var hostname string
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		hostname = h
+	} else {
+		// SplitHostPort fails for bare IPv6 like "[::1]" (no port).
+		// Strip the brackets so net.ParseIP can handle it.
+		hostname = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	}
+	if strings.EqualFold(hostname, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(hostname)
+	if ip == nil {
+		return false
+	}
+	for _, block := range privateRanges {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // validateTargetURL enforces the rules the API contract advertises:
-// non-empty, length-capped, parseable, http(s) scheme, non-empty host.
+// non-empty, length-capped, parseable, http(s) scheme, non-empty host,
+// and a host that is not a private/loopback/link-local address.
 func validateTargetURL(s string) error {
 	if s == "" {
 		return errors.New("target_url is required")
@@ -852,6 +910,9 @@ func validateTargetURL(s string) error {
 	}
 	if u.Host == "" {
 		return errors.New("target_url must have a host")
+	}
+	if isPrivateHost(u.Host) {
+		return errors.New("target_url must not point to a private or internal address")
 	}
 	return nil
 }
