@@ -856,6 +856,7 @@ func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 		name      string
 		path      string
 		seed      func(*fakeStore)
+		seedCache func(*fakeCache)
 		wantCode  int
 		wantECode string
 	}{
@@ -892,6 +893,9 @@ func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 				// then seed the negative-cache sentinel to short-circuit.
 				_, _ = st.CreateLink(context.Background(), nil, "ncached", "https://nc.example", &future)
 			},
+			seedCache: func(cc *fakeCache) {
+				_ = cc.Set(context.Background(), "link:ncached", "", time.Minute)
+			},
 			wantCode:  http.StatusNotFound,
 			wantECode: handlers.ErrCodeNotFound,
 		},
@@ -904,9 +908,8 @@ func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 			if tc.seed != nil {
 				tc.seed(st)
 			}
-			// For the negative-cache case, manually seed the sentinel.
-			if tc.wantECode == handlers.ErrCodeNotFound && tc.name == "negative cache hit returns not_found" {
-				_ = cc.Set(context.Background(), "link:ncached", "", time.Minute)
+			if tc.seedCache != nil {
+				tc.seedCache(cc)
 			}
 			e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
 
