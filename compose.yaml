@@ -66,6 +66,11 @@ x-postgres-base: &postgres-base
     timeout: 3s
     retries: 10
   restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 512m
 
 x-redis-base: &redis-base
   image: redis:8.6.2-trixie
@@ -76,6 +81,11 @@ x-redis-base: &redis-base
     timeout: 3s
     retries: 10
   restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "0.5"
+        memory: 128m
 
 services:
   # --- `dev` profile --------------------------------------------------------
@@ -138,6 +148,11 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
 
   # --- `tls` profile --------------------------------------------------------
   # Same binary as `server`, but speaks HTTPS on :8443 using the cert +
@@ -191,6 +206,11 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
 
   # --- `test` profile -------------------------------------------------------
   # Isolated db + redis for the integration suite. Reuse the same fragments
