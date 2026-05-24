@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -66,6 +69,80 @@ func Versions(ctx context.Context, databaseURL string) (current int64, latest in
 		return 0, 0, err
 	}
 	return current, latest, nil
+}
+
+// Redo rolls back the most recently applied migration and immediately
+// re-applies it. This is useful during development to iterate on the
+// current migration without manually running down then up.
+func Redo(ctx context.Context, databaseURL string) error {
+	return run(ctx, databaseURL, func(db *sql.DB) error {
+		return goose.RedoContext(ctx, db, migrationsDir)
+	})
+}
+
+// sqlTemplate is written into every new migration file created by Create.
+var sqlTemplate = template.Must(template.New("goose").Parse(`-- +goose Up
+-- +goose StatementBegin
+
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+
+-- +goose StatementEnd
+`))
+
+// Create writes a new sequential goose SQL migration file into dir.
+// The file is named NNNNN_<name>.sql where NNNNN is one greater than the
+// highest version already present in dir.
+// It returns the path of the created file.
+func Create(dir, name string) (string, error) {
+	if name == "" {
+		return "", errors.New("migrate: migration name must not be empty")
+	}
+
+	next, err := nextVersion(dir)
+	if err != nil {
+		return "", err
+	}
+
+	filename := fmt.Sprintf("%05d_%s.sql", next, name)
+	path := filepath.Join(dir, filename)
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("migrate: create file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if err := sqlTemplate.Execute(f, nil); err != nil {
+		return "", fmt.Errorf("migrate: write template: %w", err)
+	}
+	return path, nil
+}
+
+// nextVersion scans dir for files matching the goose sequential naming
+// convention (NNNNN_*.sql) and returns max+1, or 1 if dir is empty.
+func nextVersion(dir string) (int64, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("migrate: read dir %q: %w", dir, err)
+	}
+
+	var max int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		v, err := goose.NumericComponent(e.Name())
+		if err != nil {
+			continue // skip files that don't match the pattern
+		}
+		if v > max {
+			max = v
+		}
+	}
+	return max + 1, nil
 }
 
 func latestEmbeddedVersion() (int64, error) {

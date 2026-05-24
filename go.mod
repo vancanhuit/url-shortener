@@ -3,6 +3,7 @@ module github.com/vancanhuit/url-shortener
 go 1.26
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/labstack/echo/v5 v5.1.1
 	github.com/pressly/goose/v3 v3.27.1
@@ -15,7 +16,6 @@ require (
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
