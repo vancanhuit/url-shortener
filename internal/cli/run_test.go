@@ -12,8 +12,6 @@ import (
 )
 
 func TestEnsureSchemaCurrent_AutoMigrateRunsUp(t *testing.T) {
-	t.Parallel()
-
 	origUp := migrateUpFn
 	origVersions := migrateVersionsFn
 	t.Cleanup(func() {
@@ -48,8 +46,6 @@ func TestEnsureSchemaCurrent_AutoMigrateRunsUp(t *testing.T) {
 }
 
 func TestEnsureSchemaCurrent_BehindSchemaReturnsActionableError(t *testing.T) {
-	t.Parallel()
-
 	origUp := migrateUpFn
 	origVersions := migrateVersionsFn
 	t.Cleanup(func() {
@@ -83,8 +79,6 @@ func TestEnsureSchemaCurrent_BehindSchemaReturnsActionableError(t *testing.T) {
 }
 
 func TestEnsureSchemaCurrent_PropagatesVersionsError(t *testing.T) {
-	t.Parallel()
-
 	origUp := migrateUpFn
 	origVersions := migrateVersionsFn
 	t.Cleanup(func() {
