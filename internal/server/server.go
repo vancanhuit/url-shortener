@@ -100,9 +100,15 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		e.IPExtractor = extractor
 	}
 
+	reg := newMetricsRegistry()
+	reqTotal, reqDuration := newRequestMetrics(reg)
+
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
 	e.Use(slogRequestLogger(logger))
+	// Prometheus RED metrics: record every request's rate, error
+	// count, and duration by route template and status code.
+	e.Use(buildMetricsMiddleware(reqTotal, reqDuration))
 	// Cap request bodies before any handler reads them. Echo's
 	// BodyLimit short-circuits with 413 Request Entity Too Large
 	// when Content-Length exceeds the cap, and wraps the body
@@ -126,6 +132,7 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	})
 	op.AddReadinessCheck("redis", deps.Cache.Ping)
 	op.Mount(e)
+	mountMetrics(e, reg)
 
 	// API self-description: mount the embedded OpenAPI 3.1 document
 	// at /api/v1/openapi.{json,yaml} ahead of the JSON API itself so
