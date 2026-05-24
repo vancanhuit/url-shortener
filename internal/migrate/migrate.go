@@ -68,6 +68,32 @@ func Versions(ctx context.Context, databaseURL string) (current int64, latest in
 	return current, latest, nil
 }
 
+// Redo rolls back the most recently applied migration and immediately
+// re-applies it. This is useful during development to iterate on the
+// current migration without manually running down then up.
+func Redo(ctx context.Context, databaseURL string) error {
+	return run(ctx, databaseURL, func(db *sql.DB) error {
+		return goose.RedoContext(ctx, db, migrationsDir)
+	})
+}
+
+// Create scaffolds a new migration file on disk.
+//
+// This is intended for local development workflows; unlike Up/Down/Status,
+// it does not touch the database.
+func Create(dir, name, migrationType string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("migrate: migration name is empty")
+	}
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("migrate: migration dir is empty")
+	}
+	if migrationType == "" {
+		migrationType = string(goose.TypeSQL)
+	}
+	return goose.Create(nil, dir, name, migrationType)
+}
+
 func latestEmbeddedVersion() (int64, error) {
 	entries, err := fs.ReadDir(migrations.FS, migrationsDir)
 	if err != nil {
