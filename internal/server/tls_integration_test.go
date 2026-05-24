@@ -160,7 +160,7 @@ func overwriteSelfSignedCert(t *testing.T, certPath, keyPath string, serial int6
 }
 
 func tlsPeerSerial(addr string) (string, error) {
-	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}) //nolint:gosec // test-only serial probe
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
 	if err != nil {
 		return "", err
 	}
@@ -345,7 +345,7 @@ func TestServer_TLSCertHotReloadWithoutRestart(t *testing.T) {
 	before := ""
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		conn, dialErr := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}) //nolint:gosec // test-only probe
+		conn, dialErr := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
 		if dialErr == nil {
 			state := conn.ConnectionState()
 			if len(state.PeerCertificates) > 0 {
