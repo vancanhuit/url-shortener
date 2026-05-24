@@ -117,3 +117,89 @@ func TestPing(t *testing.T) {
 		t.Errorf("Ping: %v", err)
 	}
 }
+
+// TestRateLimit_FixedWindowBehavior verifies the core contract of
+// RateLimit: the first `limit` calls for a key are allowed, the next
+// are denied, and the counter resets after the window expires.
+func TestRateLimit_FixedWindowBehavior(t *testing.T) {
+	c := newClient(t)
+	ctx := t.Context()
+	key := uniqueKey(t, "rl")
+
+	const limit = 3
+	const window = 200 * time.Millisecond
+
+	t.Cleanup(func() { _ = c.Del(context.Background(), key) })
+
+	// First `limit` calls must be allowed.
+	for i := range limit {
+		allowed, remaining, err := c.RateLimit(ctx, key, limit, window)
+		if err != nil {
+			t.Fatalf("call %d: RateLimit: %v", i+1, err)
+		}
+		if !allowed {
+			t.Errorf("call %d: allowed = false, want true", i+1)
+		}
+		want := limit - (i + 1)
+		if remaining != want {
+			t.Errorf("call %d: remaining = %d, want %d", i+1, remaining, want)
+		}
+	}
+
+	// (limit+1)-th call must be denied.
+	allowed, _, err := c.RateLimit(ctx, key, limit, window)
+	if err != nil {
+		t.Fatalf("over-limit call: RateLimit: %v", err)
+	}
+	if allowed {
+		t.Errorf("over-limit call: allowed = true, want false")
+	}
+
+	// After the window expires the counter resets.
+	time.Sleep(window + 50*time.Millisecond)
+
+	allowed, _, err = c.RateLimit(ctx, key, limit, window)
+	if err != nil {
+		t.Fatalf("post-reset call: RateLimit: %v", err)
+	}
+	if !allowed {
+		t.Errorf("post-reset call: allowed = false, want true (window should have reset)")
+	}
+}
+
+// TestRateLimit_PerKeyIsolation: distinct keys (different IPs) each
+// get independent counters.
+func TestRateLimit_PerKeyIsolation(t *testing.T) {
+	c := newClient(t)
+	ctx := t.Context()
+
+	keyA := uniqueKey(t, "rl-a")
+	keyB := uniqueKey(t, "rl-b")
+	t.Cleanup(func() {
+		_ = c.Del(context.Background(), keyA, keyB)
+	})
+
+	const limit = 1
+	const window = time.Second
+
+	// Exhaust key B.
+	if _, _, err := c.RateLimit(ctx, keyB, limit, window); err != nil {
+		t.Fatalf("B first: %v", err)
+	}
+	allowed, _, err := c.RateLimit(ctx, keyB, limit, window)
+	if err != nil {
+		t.Fatalf("B second: %v", err)
+	}
+	if allowed {
+		t.Fatalf("B second: allowed = true, want false")
+	}
+
+	// Key A must still be within budget.
+	allowed, _, err = c.RateLimit(ctx, keyA, limit, window)
+	if err != nil {
+		t.Fatalf("A first: %v", err)
+	}
+	if !allowed {
+		t.Errorf("A first: allowed = false, want true (keys must be isolated)")
+	}
+}

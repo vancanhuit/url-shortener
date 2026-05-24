@@ -152,7 +152,7 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		CacheTTL:         cfg.CacheTTL,
 		NegativeCacheTTL: cfg.NegativeCacheTTL,
 	})
-	createMW := buildCreateRateLimiter(cfg, logger)
+	createMW := buildCreateRateLimiter(cfg, deps.Cache, logger)
 	links.Mount(e, createMW...)
 
 	// SPA shell + static assets. The Vite + Svelte build emits
