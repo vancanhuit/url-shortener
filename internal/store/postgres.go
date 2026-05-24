@@ -278,16 +278,17 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 		rows pgx.Rows
 		err  error
 	)
-	// Soft-deleted rows are filtered out of the recent list: a
-	// retired link has no business reappearing in the public feed,
-	// and the deleted_at IS NOT NULL partial index keeps the filter
-	// cheap regardless of the deleted-row volume.
+	// Soft-deleted and expired rows are filtered out of the recent list.
+	// The deleted_at IS NOT NULL partial index keeps the deleted-row filter
+	// cheap regardless of volume; the expires_at condition uses the same
+	// index scan because expired rows are a small fraction of the table.
 	if beforeID > 0 {
 		const q = `
 			SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
 			FROM links
 			WHERE id < $1
 			  AND deleted_at IS NULL
+			  AND (expires_at IS NULL OR expires_at > NOW())
 			ORDER BY id DESC
 			LIMIT $2
 		`
@@ -297,6 +298,7 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 			SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
 			FROM links
 			WHERE deleted_at IS NULL
+			  AND (expires_at IS NULL OR expires_at > NOW())
 			ORDER BY id DESC
 			LIMIT $1
 		`

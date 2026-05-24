@@ -351,3 +351,55 @@ func TestSoftDeleteLink_UnknownCodeReturnsErrNotFound(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestListLinks_ExcludesExpiredLinks verifies that ListLinks omits rows
+// whose expires_at is in the past while returning rows that are still
+// active (expires_at in the future) or have no expiry.
+func TestListLinks_ExcludesExpiredLinks(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+
+	codeExpired := uniqueCode(t)
+	codeFuture := uniqueCode(t)
+	codeNoExpiry := uniqueCode(t)
+
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(time.Hour)
+
+	if _, err := s.CreateLink(ctx, nil, codeExpired, "https://example.com/expired/"+codeExpired, &past); err != nil {
+		t.Fatalf("CreateLink expired: %v", err)
+	}
+	if _, err := s.CreateLink(ctx, nil, codeFuture, "https://example.com/future/"+codeFuture, &future); err != nil {
+		t.Fatalf("CreateLink future: %v", err)
+	}
+	if _, err := s.CreateLink(ctx, nil, codeNoExpiry, "https://example.com/noexpiry/"+codeNoExpiry, nil); err != nil {
+		t.Fatalf("CreateLink noexpiry: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		for _, c := range []string{codeExpired, codeFuture, codeNoExpiry} {
+			_, _ = s.Pool().Exec(bg, `DELETE FROM links WHERE code = $1`, c)
+		}
+	})
+
+	// Use a large limit; rely on code membership rather than exact position.
+	rows, err := s.ListLinks(ctx, nil, 100, 0)
+	if err != nil {
+		t.Fatalf("ListLinks: %v", err)
+	}
+
+	seen := make(map[string]bool, len(rows))
+	for _, l := range rows {
+		seen[l.Code] = true
+	}
+
+	if seen[codeExpired] {
+		t.Errorf("ListLinks returned expired link (code=%q)", codeExpired)
+	}
+	if !seen[codeFuture] {
+		t.Errorf("ListLinks omitted future-expiry link (code=%q)", codeFuture)
+	}
+	if !seen[codeNoExpiry] {
+		t.Errorf("ListLinks omitted no-expiry link (code=%q)", codeNoExpiry)
+	}
+}

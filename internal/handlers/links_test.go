@@ -126,19 +126,23 @@ func (f *fakeStore) GetLinkByTargetURL(_ context.Context, _ store.DBTX, targetUR
 
 // ListLinks returns the stored links sorted by id descending, mirroring
 // the production ordering. beforeID, when > 0, filters to ids < beforeID.
-// Soft-deleted rows are excluded so the fake matches what the SQL
-// implementation does (`WHERE deleted_at IS NULL`). When failList is
-// set, every call returns that error -- used to verify graceful
-// degradation when the database is unavailable.
+// Soft-deleted and expired rows are excluded so the fake matches what the
+// SQL implementation does. When failList is set, every call returns that
+// error -- used to verify graceful degradation when the database is
+// unavailable.
 func (f *fakeStore) ListLinks(_ context.Context, _ store.DBTX, limit int, beforeID int64) ([]store.Link, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failList != nil {
 		return nil, f.failList
 	}
+	now := time.Now()
 	all := make([]store.Link, 0, len(f.links))
 	for _, l := range f.links {
 		if l.DeletedAt != nil {
+			continue
+		}
+		if l.ExpiresAt != nil && !l.ExpiresAt.After(now) {
 			continue
 		}
 		if beforeID > 0 && l.ID >= beforeID {
@@ -1300,6 +1304,50 @@ func TestList_ExcludesSoftDeletedRows(t *testing.T) {
 	for _, item := range resp.Items {
 		if item.Code == "remove1" {
 			t.Errorf("list returned soft-deleted code %q", item.Code)
+		}
+	}
+}
+
+func TestList_ExcludesExpiredLinks(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(time.Hour)
+
+	seeds := []struct {
+		code       string
+		expiresAt  *time.Time
+		wantInList bool
+	}{
+		{"exp-past", &past, false},
+		{"exp-future", &future, true},
+		{"exp-none", nil, true},
+	}
+	for _, s := range seeds {
+		if _, err := st.CreateLink(context.Background(), nil, s.code, "https://example.com/"+s.code, s.expiresAt); err != nil {
+			t.Fatalf("seed %q: %v", s.code, err)
+		}
+	}
+
+	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
+	}
+	resp := decodeList(t, body)
+
+	seen := make(map[string]bool, len(resp.Items))
+	for _, item := range resp.Items {
+		seen[item.Code] = true
+	}
+
+	for _, s := range seeds {
+		if s.wantInList && !seen[s.code] {
+			t.Errorf("list omitted code %q (should be present)", s.code)
+		}
+		if !s.wantInList && seen[s.code] {
+			t.Errorf("list returned code %q (should be excluded: expired)", s.code)
 		}
 	}
 }
