@@ -76,6 +76,11 @@ const (
 
 // LinkStore is the storage surface the links handler depends on. It is
 // satisfied by *store.Store; tests use a fake implementation.
+//
+// The db parameter on every method follows the nil-means-pool convention
+// defined on store.DBTX: pass nil for standalone operations (all current
+// call sites do this) and a live *pgx.Tx only when multiple operations
+// must share a transaction.
 type LinkStore interface {
 	CreateLink(ctx context.Context, db store.DBTX, code, targetURL string, expiresAt *time.Time) (store.Link, error)
 	GetLinkByCode(ctx context.Context, db store.DBTX, code string) (store.Link, error)

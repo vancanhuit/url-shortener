@@ -77,6 +77,11 @@ func IsTransient(err error) bool {
 
 // DBTX is satisfied by *pgxpool.Pool (and pgxpool.Conn) as well as pgx.Tx,
 // allowing store methods to participate in caller-managed transactions.
+//
+// Convention: pass nil to use the store's own connection pool (the common
+// case -- every current call site does this). Pass a *pgx.Tx obtained from
+// s.Pool().Begin() only when multiple store operations must be atomic; each
+// method checks for nil and falls back to s.pool automatically.
 type DBTX interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
