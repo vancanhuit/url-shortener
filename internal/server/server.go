@@ -110,6 +110,10 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	// read too. Applies to every route, including the static
 	// asset handler (where bodies are always empty in practice).
 	e.Use(middleware.BodyLimit(maxRequestBodyBytes))
+	// Security headers: X-Content-Type-Options, X-Frame-Options,
+	// X-XSS-Protection, Referrer-Policy, and (for HTTPS requests)
+	// Strict-Transport-Security. Applied to every response.
+	e.Use(buildSecureHeaders())
 	// CORS is opt-in via config; no-op when CORSAllowedOrigins is
 	// empty (the default for same-origin SPA + API deployments).
 	if cors := buildCORS(cfg, logger); cors != nil {
