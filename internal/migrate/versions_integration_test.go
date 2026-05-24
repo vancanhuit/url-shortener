@@ -15,7 +15,7 @@ func testDatabaseURL(t *testing.T) string {
 	t.Helper()
 	url := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("URL_SHORTENER_TEST_DATABASE_URL not set; skipping integration test")
+		t.Fatal("URL_SHORTENER_TEST_DATABASE_URL must be set to run integration tests")
 	}
 	return url
 }

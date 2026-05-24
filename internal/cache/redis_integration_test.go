@@ -21,7 +21,7 @@ func newClient(t *testing.T) *cache.Client {
 	t.Helper()
 	url := os.Getenv("URL_SHORTENER_TEST_REDIS_URL")
 	if url == "" {
-		t.Skip("URL_SHORTENER_TEST_REDIS_URL not set; skipping integration test")
+		t.Fatal("URL_SHORTENER_TEST_REDIS_URL must be set to run integration tests")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
