@@ -143,7 +143,7 @@ func (h *Links) listPage(ctx context.Context, pageSize int, beforeID int64) ([]s
 // implies either an exhausted keyspace or a degenerate generator and
 // should surface as a 500.
 func (h *Links) createWithRandomCode(ctx context.Context, target string, expiresAt *time.Time) (store.Link, error) {
-	for i := 0; i < h.retries; i++ {
+	for i := 0; i < CreateMaxRetries; i++ {
 		code, err := h.gen.Generate()
 		if err != nil {
 			return store.Link{}, fmt.Errorf("generate code: %w", err)
@@ -155,7 +155,7 @@ func (h *Links) createWithRandomCode(ctx context.Context, target string, expires
 		}
 		return l, err
 	}
-	return store.Link{}, fmt.Errorf("failed to generate unique code after %d attempts", h.retries)
+	return store.Link{}, fmt.Errorf("failed to generate unique code after %d attempts", CreateMaxRetries)
 }
 
 // validateExpiresAt enforces that an explicit expiry is in the future
