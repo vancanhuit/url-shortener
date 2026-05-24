@@ -434,9 +434,11 @@ compose-smoke:
 #   3. Hit /healthz, /readyz, /version over HTTPS with
 #      `--cacert <tempdir>/rootCA.pem` -- a strict check that the
 #      server is actually serving the cert we just signed.
-#   4. Tear down on exit (success or failure) via trap.
+#   4. Rotate the leaf cert in-place and assert the running server
+#      serves the new cert without restart (hot-reload behavior).
+#   5. Tear down on exit (success or failure) via trap.
 #
-# Requires mkcert + curl + jq on PATH. mkcert install instructions
+# Requires mkcert + curl + jq + openssl on PATH. mkcert install instructions
 # are in the dev-certs recipe doc-comment.
 [group("test")]
 tls-smoke:
@@ -447,6 +449,24 @@ tls-smoke:
         echo 'mkcert not found on PATH; see `just dev-certs` for install instructions.' >&2
         exit 1
     fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo 'openssl not found on PATH; required to verify cert hot-reload.' >&2
+        exit 1
+    fi
+
+    tls_serial() {
+        # Extract the currently-served leaf cert serial from the live listener.
+        # -verify_return_error fails fast if the cert chain is not trusted by
+        # the provided CA (guarding against accidental fallback certs).
+        openssl s_client \
+            -connect localhost:8443 \
+            -servername localhost \
+            -CAfile "$cacert" \
+            -verify_return_error \
+            </dev/null 2>/dev/null \
+            | openssl x509 -noout -serial 2>/dev/null \
+            | sed -E 's/^serial=//'
+    }
 
     workdir=$(mktemp -d -t url-shortener-tls-smoke-XXXXXX)
     export TLS_CERTS_DIR="$workdir/certs"
@@ -479,8 +499,8 @@ tls-smoke:
     cacert="$CAROOT/rootCA.pem"
     test -f "$cacert" || { echo "rootCA.pem not at $cacert" >&2; exit 1; }
 
-    echo "== docker compose --profile=tls up --wait =="
-    docker compose --profile=tls up --wait --detach
+    echo "== docker compose --profile=tls up --wait --build =="
+    docker compose --profile=tls up --wait --detach --build
 
     base="https://localhost:8443"
 
@@ -496,6 +516,31 @@ tls-smoke:
     echo "== /version =="
     curl --fail-with-body -sS --cacert "$cacert" "$base/version" \
         | tee /dev/stderr | jq -e 'has("version")' >/dev/null
+
+    echo "== TLS cert hot-reload (rotate leaf cert in place) =="
+    before_serial=$(tls_serial)
+    test -n "$before_serial" || { echo "failed to read initial TLS serial" >&2; exit 1; }
+
+    # Re-issue the leaf cert at the same paths while the server is running.
+    # The server's fsnotify-based TLS reloader should pick this up and start
+    # serving the new cert without restarting the process.
+    mkcert \
+        -cert-file "$TLS_CERTS_DIR/cert.pem" \
+        -key-file  "$TLS_CERTS_DIR/key.pem" \
+        localhost 127.0.0.1 ::1 >/dev/null
+    chmod 0644 "$TLS_CERTS_DIR/key.pem"
+
+    after_serial=""
+    for _ in $(seq 1 50); do
+        after_serial=$(tls_serial || true)
+        if [ -n "$after_serial" ] && [ "$after_serial" != "$before_serial" ]; then
+            break
+        fi
+        sleep 0.1
+    done
+    test -n "$after_serial" || { echo "failed to read TLS serial after rotation" >&2; exit 1; }
+    test "$after_serial" != "$before_serial" \
+        || { echo "TLS cert serial did not change after in-place rotation" >&2; exit 1; }
 
     # Negative check: without --cacert (no host-trust install), the
     # request must fail at TLS verification. Proves the certificate
