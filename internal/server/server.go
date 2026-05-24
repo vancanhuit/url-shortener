@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -206,11 +207,31 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		)
 		var err error
 		if tlsEnabled {
-			// ServeTLS reads cert+key from disk on every call. The
-			// http.Server.TLSConfig is left at its zero value so Go's
-			// secure defaults apply (TLS 1.2+ minimum from Go 1.18,
-			// modern cipher suites with HTTP/2 support).
-			err = s.http.ServeTLS(ln, s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+			reloader, reloadErr := newCertReloader(s.cfg.TLSCertFile, s.cfg.TLSKeyFile, s.logger)
+			if reloadErr != nil {
+				errCh <- reloadErr
+				close(errCh)
+				return
+			}
+			stopReload, reloadErr := reloader.start(ctx)
+			if reloadErr != nil {
+				errCh <- reloadErr
+				close(errCh)
+				return
+			}
+			defer stopReload()
+
+			// Serve TLS with a dynamic certificate callback so certificate
+			// replacement on disk takes effect without process restart.
+			tlsCfg := &tls.Config{ //nolint:gosec // secure defaults apply; no legacy overrides set.
+				GetCertificate: reloader.getCertificate,
+			}
+			if s.http.TLSConfig != nil {
+				tlsCfg = s.http.TLSConfig.Clone()
+				tlsCfg.GetCertificate = reloader.getCertificate
+			}
+			s.http.TLSConfig = tlsCfg
+			err = s.http.ServeTLS(ln, "", "")
 		} else {
 			err = s.http.Serve(ln)
 		}
