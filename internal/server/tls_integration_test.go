@@ -20,6 +20,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -27,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -95,6 +98,78 @@ func generateSelfSignedCert(t *testing.T, dir string) (certPath, keyPath string)
 		t.Fatalf("close key.pem: %v", err)
 	}
 	return certPath, keyPath
+}
+
+func overwriteSelfSignedCert(t *testing.T, certPath, keyPath string, serial int64) {
+	t.Helper()
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(serial),
+		Subject:      pkix.Name{CommonName: fmt.Sprintf("url-shortener-test-%d", serial)},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		DNSNames:     []string{"localhost"},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate: %v", err)
+	}
+
+	tmpCert := certPath + ".tmp"
+	tmpKey := keyPath + ".tmp"
+
+	certFile, err := os.Create(tmpCert)
+	if err != nil {
+		t.Fatalf("create tmp cert: %v", err)
+	}
+	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		t.Fatalf("pem encode cert: %v", err)
+	}
+	if err := certFile.Close(); err != nil {
+		t.Fatalf("close tmp cert: %v", err)
+	}
+
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		t.Fatalf("MarshalECPrivateKey: %v", err)
+	}
+	keyFile, err := os.OpenFile(tmpKey, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatalf("create tmp key: %v", err)
+	}
+	if err := pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
+		t.Fatalf("pem encode key: %v", err)
+	}
+	if err := keyFile.Close(); err != nil {
+		t.Fatalf("close tmp key: %v", err)
+	}
+
+	if err := os.Rename(tmpCert, certPath); err != nil {
+		t.Fatalf("rename cert: %v", err)
+	}
+	if err := os.Rename(tmpKey, keyPath); err != nil {
+		t.Fatalf("rename key: %v", err)
+	}
+}
+
+func tlsPeerSerial(addr string) (string, error) {
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = conn.Close() }()
+	state := conn.ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		return "", errors.New("peer certificates missing")
+	}
+	return state.PeerCertificates[0].SerialNumber.String(), nil
 }
 
 func TestServer_TLSListenerServesHTTPS(t *testing.T) {
@@ -215,4 +290,101 @@ func TestServer_TLSListenerServesHTTPS(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Error("Serve did not return within 20s of cancellation")
 	}
+}
+
+func TestServer_TLSCertHotReloadWithoutRestart(t *testing.T) {
+	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
+	redisURL := os.Getenv("URL_SHORTENER_TEST_REDIS_URL")
+	if dbURL == "" || redisURL == "" {
+		t.Skip("URL_SHORTENER_TEST_DATABASE_URL / URL_SHORTENER_TEST_REDIS_URL not set; skipping integration test")
+	}
+
+	certPath, keyPath := generateSelfSignedCert(t, t.TempDir())
+
+	ctx := t.Context()
+	st, err := store.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(st.Close)
+	cc, err := cache.New(ctx, redisURL)
+	if err != nil {
+		t.Fatalf("cache.New: %v", err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	gen, err := shortener.NewGenerator(shortener.DefaultLength)
+	if err != nil {
+		t.Fatalf("shortener.NewGenerator: %v", err)
+	}
+
+	cfg := config.Config{
+		Env:         config.EnvDev,
+		Addr:        "127.0.0.1:0",
+		BaseURL:     "https://short.test",
+		LogLevel:    "info",
+		LogFormat:   "text",
+		CodeLength:  shortener.DefaultLength,
+		TLSCertFile: certPath,
+		TLSKeyFile:  keyPath,
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := server.New(cfg, logger, server.Deps{Store: st, Cache: cc, Generator: gen})
+
+	runCtx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(runCtx, ln) }()
+
+	addr := ln.Addr().String()
+
+	before := ""
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
+		if dialErr == nil {
+			state := conn.ConnectionState()
+			if len(state.PeerCertificates) > 0 {
+				before = state.PeerCertificates[0].SerialNumber.String()
+				_ = conn.Close()
+				break
+			}
+			_ = conn.Close()
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if before == "" {
+		t.Fatal("TLS listener never became ready")
+	}
+
+	overwriteSelfSignedCert(t, certPath, keyPath, 424242)
+
+	want := strconv.FormatInt(424242, 10)
+	reloadDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(reloadDeadline) {
+		got, probeErr := tlsPeerSerial(addr)
+		if probeErr == nil && got == want {
+			cancel()
+			select {
+			case serveErr := <-done:
+				if serveErr != nil {
+					t.Errorf("Serve returned error: %v", serveErr)
+				}
+			case <-time.After(20 * time.Second):
+				t.Error("Serve did not return within 20s of cancellation")
+			}
+			return
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+
+	got, err := tlsPeerSerial(addr)
+	if err != nil {
+		t.Fatalf("tlsPeerSerial: %v", err)
+	}
+	t.Fatalf("certificate serial after reload = %s, want %s", got, want)
 }
