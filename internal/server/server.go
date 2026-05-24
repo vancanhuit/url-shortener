@@ -223,7 +223,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 			// Serve TLS with a dynamic certificate callback so certificate
 			// replacement on disk takes effect without process restart.
-			tlsCfg := &tls.Config{ //nolint:gosec // secure defaults apply; no legacy overrides set.
+			tlsCfg := &tls.Config{
 				GetCertificate: reloader.getCertificate,
 			}
 			if s.http.TLSConfig != nil {
