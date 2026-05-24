@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { listLinks, type Link } from "./lib/api";
+  import { listLinks, getVersion, type Link } from "./lib/api";
   import LinkForm from "./lib/LinkForm.svelte";
   import LinkResult from "./lib/LinkResult.svelte";
   import LinkError from "./lib/LinkError.svelte";
@@ -9,6 +9,7 @@
 
   let items: Link[] = $state([]);
   let nextCursor: number | null = $state(null);
+  let version: string | null = $state(null);
 
   let result: { link: Link; created: boolean } | null = $state(null);
   let error: { message: string } | null = $state(null);
@@ -28,7 +29,15 @@
     }
   }
 
-  onMount(refreshFirstPage);
+  onMount(async () => {
+    await refreshFirstPage();
+    try {
+      const info = await getVersion();
+      version = info.version;
+    } catch {
+      // Version fetch is best-effort; don't surface failures to the user.
+    }
+  });
 
   async function onCreated(payload: { link: Link; created: boolean }): Promise<void> {
     result = payload;
@@ -152,6 +161,10 @@
           >Tailwind CSS</a
         >
       </li>
+      {#if version}
+        <li aria-hidden="true" class="text-slate-300 dark:text-slate-600 select-none">&middot;</li>
+        <li><span class="font-mono">{version}</span></li>
+      {/if}
     </ul>
   </div>
 </footer>
