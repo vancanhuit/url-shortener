@@ -8,10 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
-	"text/template"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -80,69 +77,21 @@ func Redo(ctx context.Context, databaseURL string) error {
 	})
 }
 
-// sqlTemplate is written into every new migration file created by Create.
-var sqlTemplate = template.Must(template.New("goose").Parse(`-- +goose Up
--- +goose StatementBegin
-
--- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-
--- +goose StatementEnd
-`))
-
-// Create writes a new sequential goose SQL migration file into dir.
-// The file is named NNNNN_<name>.sql where NNNNN is one greater than the
-// highest version already present in dir.
-// It returns the path of the created file.
-func Create(dir, name string) (string, error) {
-	if name == "" {
-		return "", errors.New("migrate: migration name must not be empty")
+// Create scaffolds a new migration file on disk.
+//
+// This is intended for local development workflows; unlike Up/Down/Status,
+// it does not touch the database.
+func Create(dir, name, migrationType string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("migrate: migration name is empty")
 	}
-
-	next, err := nextVersion(dir)
-	if err != nil {
-		return "", err
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("migrate: migration dir is empty")
 	}
-
-	filename := fmt.Sprintf("%05d_%s.sql", next, name)
-	path := filepath.Join(dir, filename)
-
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // path is constructed from a user-supplied migration name
-	if err != nil {
-		return "", fmt.Errorf("migrate: create file: %w", err)
+	if migrationType == "" {
+		migrationType = string(goose.TypeSQL)
 	}
-	defer func() { _ = f.Close() }()
-
-	if err := sqlTemplate.Execute(f, nil); err != nil {
-		return "", fmt.Errorf("migrate: write template: %w", err)
-	}
-	return path, nil
-}
-
-// nextVersion scans dir for files matching the goose sequential naming
-// convention (NNNNN_*.sql) and returns max+1, or 1 if dir is empty.
-func nextVersion(dir string) (int64, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0, fmt.Errorf("migrate: read dir %q: %w", dir, err)
-	}
-
-	var maxVer int64
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
-			continue
-		}
-		v, err := goose.NumericComponent(e.Name())
-		if err != nil {
-			continue // skip files that don't match the pattern
-		}
-		if v > maxVer {
-			maxVer = v
-		}
-	}
-	return maxVer + 1, nil
+	return goose.Create(nil, dir, name, migrationType)
 }
 
 func latestEmbeddedVersion() (int64, error) {

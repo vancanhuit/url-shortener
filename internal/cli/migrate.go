@@ -109,19 +109,20 @@ func newMigrateRedoCmd(flags *migrateFlags) *cobra.Command {
 
 func newMigrateCreateCmd() *cobra.Command {
 	var dir string
+	var migrationType string
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a new sequential SQL migration file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := migrate.Create(dir, args[0])
-			if err != nil {
+			if err := migrate.Create(dir, args[0], migrationType); err != nil {
 				return err
 			}
-			cmd.Printf("Created migration: %s\n", path)
+			cmd.Printf("Created migration: %s/%s\n", dir, args[0])
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "migrations", "Directory to write the new migration file into")
+	cmd.Flags().StringVar(&migrationType, "type", "sql", "Migration type: sql or go")
 	return cmd
 }
