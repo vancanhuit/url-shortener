@@ -14,8 +14,8 @@ func TestLatestEmbeddedVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("latestEmbeddedVersion() error = %v", err)
 	}
-	if got != 4 {
-		t.Fatalf("latestEmbeddedVersion() = %d, want 4", got)
+	if got != 5 {
+		t.Fatalf("latestEmbeddedVersion() = %d, want 5", got)
 	}
 }
 

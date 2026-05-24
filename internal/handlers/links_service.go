@@ -93,18 +93,18 @@ func (h *Links) Persist(ctx context.Context, target, userCode string, expiresAt 
 		return link, true, nil
 	}
 
-	// Auto-generated path: only dedup permanent requests against
-	// permanent existing rows. The store already filters the
-	// existing-side condition (expires_at IS NULL); we enforce the
-	// requesting-side here.
+	// Auto-generated, permanent path: use an atomic get-or-insert so
+	// concurrent requests for the same target URL across multiple replicas
+	// converge on one row instead of racing to insert duplicates.
 	if expiresAt == nil {
-		existing, lookupErr := h.store.GetLinkByTargetURL(ctx, nil, norm)
-		if lookupErr == nil {
-			return existing, false, nil
+		link, created, err = h.createOrReuseAutoLink(ctx, norm)
+		if err != nil {
+			return store.Link{}, false, err
 		}
-		if !errors.Is(lookupErr, store.ErrNotFound) {
-			return store.Link{}, false, lookupErr
+		if created {
+			h.cachePut(ctx, link)
 		}
+		return link, created, nil
 	}
 
 	link, err = h.createWithRandomCode(ctx, norm, expiresAt)
@@ -136,6 +136,33 @@ func (h *Links) listPage(ctx context.Context, pageSize int, beforeID int64) ([]s
 	// Trim the probe row and use the last *kept* row's id as the cursor.
 	rows = rows[:pageSize]
 	return rows, rows[len(rows)-1].ID, nil
+}
+
+// createOrReuseAutoLink generates a random code and calls CreateAutoLink
+// in a retry loop. CreateAutoLink is a single atomic INSERT ... ON CONFLICT
+// DO UPDATE, so concurrent calls from multiple replicas for the same target
+// URL converge on a single row. ErrCodeTaken (code collision on a different
+// row) triggers a retry with a fresh code; all other errors are fatal.
+//
+// Returns (link, true, nil) when a fresh row is inserted and
+// (link, false, nil) when an existing permanent row is reused.
+func (h *Links) createOrReuseAutoLink(ctx context.Context, target string) (store.Link, bool, error) {
+	for i := 0; i < CreateMaxRetries; i++ {
+		code, err := h.gen.Generate()
+		if err != nil {
+			return store.Link{}, false, fmt.Errorf("generate code: %w", err)
+		}
+		link, created, err := h.store.CreateAutoLink(ctx, nil, code, target)
+		if errors.Is(err, store.ErrCodeTaken) {
+			h.logger.Warn("links: code collision; retrying", "attempt", i+1, "code", code)
+			continue
+		}
+		if err != nil {
+			return store.Link{}, false, err
+		}
+		return link, created, nil
+	}
+	return store.Link{}, false, fmt.Errorf("failed to generate unique code after %d attempts", CreateMaxRetries)
 }
 
 // createWithRandomCode generates a fresh code and retries on the rare

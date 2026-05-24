@@ -83,8 +83,13 @@ const (
 // must share a transaction.
 type LinkStore interface {
 	CreateLink(ctx context.Context, db store.DBTX, code, targetURL string, expiresAt *time.Time) (store.Link, error)
+	// CreateAutoLink atomically inserts a permanent auto-generated link or
+	// returns the existing one when a live permanent row already covers
+	// targetURL (dedup hit). created is false on a dedup hit. ErrCodeTaken
+	// signals a code collision on a different row; callers should retry
+	// with a new code.
+	CreateAutoLink(ctx context.Context, db store.DBTX, code, targetURL string) (store.Link, bool, error)
 	GetLinkByCode(ctx context.Context, db store.DBTX, code string) (store.Link, error)
-	GetLinkByTargetURL(ctx context.Context, db store.DBTX, targetURL string) (store.Link, error)
 	ListLinks(ctx context.Context, db store.DBTX, limit int, beforeID int64) ([]store.Link, error)
 	IncrementClicks(ctx context.Context, db store.DBTX, code string) error
 	SoftDeleteLink(ctx context.Context, db store.DBTX, code string) error

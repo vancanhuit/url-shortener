@@ -403,3 +403,116 @@ func TestListLinks_ExcludesExpiredLinks(t *testing.T) {
 		t.Errorf("ListLinks omitted no-expiry link (code=%q)", codeNoExpiry)
 	}
 }
+
+// TestCreateAutoLink_AtomicDedup verifies the get-or-insert contract:
+//
+//  1. First call inserts a new row (created = true).
+//  2. Second call with a different proposed code for the same target
+//     returns the first row unchanged (created = false).
+//  3. A call with a code already taken by a different row returns
+//     ErrCodeTaken so callers can retry with a fresh code.
+//  4. Expiring rows do not participate: a permanent CreateAutoLink for
+//     the same target as an existing expiring row creates a fresh row.
+//  5. Soft-deleted rows do not block a new CreateAutoLink for the same
+//     target: the index predicate includes deleted_at IS NULL.
+func TestCreateAutoLink_AtomicDedup(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+	suffix := uniqueCode(t)
+	target := "https://example.com/auto-dedup/" + suffix
+
+	// 1: fresh insert.
+	code1 := "ad1" + suffix
+	first, created, err := s.CreateAutoLink(ctx, nil, code1, target)
+	if err != nil {
+		t.Fatalf("CreateAutoLink first: %v", err)
+	}
+	if !created {
+		t.Errorf("first call: created = false, want true")
+	}
+	if first.Code != code1 {
+		t.Errorf("first.Code = %q, want %q", first.Code, code1)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE target_url = $1`, target)
+	})
+
+	// 2: dedup hit -- different proposed code, same target.
+	code2 := "ad2" + suffix
+	second, created, err := s.CreateAutoLink(ctx, nil, code2, target)
+	if err != nil {
+		t.Fatalf("CreateAutoLink second: %v", err)
+	}
+	if created {
+		t.Errorf("second call: created = true, want false (dedup hit)")
+	}
+	if second.Code != code1 {
+		t.Errorf("second.Code = %q, want %q (existing row)", second.Code, code1)
+	}
+	if second.ID != first.ID {
+		t.Errorf("second.ID = %d, want %d", second.ID, first.ID)
+	}
+
+	// 3: ErrCodeTaken when the proposed code belongs to a different row.
+	codeOther := "ad3" + suffix
+	otherTarget := target + "-other"
+	if _, err := s.CreateLink(ctx, nil, codeOther, otherTarget, nil); err != nil {
+		t.Fatalf("seed other row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, codeOther)
+	})
+	if _, _, err := s.CreateAutoLink(ctx, nil, codeOther, "https://example.com/new-target/"+suffix); !errors.Is(err, store.ErrCodeTaken) {
+		t.Errorf("code collision: err = %v, want ErrCodeTaken", err)
+	}
+
+	// 4: expiring rows are excluded from the partial index; a
+	// CreateAutoLink for the same target creates a fresh permanent row.
+	expiryTarget := "https://example.com/auto-dedup-expiry/" + suffix
+	codeExpiring := "ade" + suffix
+	expiresAt := time.Now().Add(time.Hour)
+	if _, err := s.CreateLink(ctx, nil, codeExpiring, expiryTarget, &expiresAt); err != nil {
+		t.Fatalf("seed expiring row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, codeExpiring)
+	})
+	codePermanent := "adp" + suffix
+	perm, created, err := s.CreateAutoLink(ctx, nil, codePermanent, expiryTarget)
+	if err != nil {
+		t.Fatalf("CreateAutoLink over expiring row: %v", err)
+	}
+	if !created {
+		t.Errorf("permanent over expiring: created = false, want true")
+	}
+	if perm.Code != codePermanent {
+		t.Errorf("perm.Code = %q, want %q", perm.Code, codePermanent)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, codePermanent)
+	})
+
+	// 5: soft-deleted auto-dedup row does not block a new insert.
+	delTarget := "https://example.com/auto-dedup-del/" + suffix
+	codeDel := "add" + suffix
+	if _, _, err := s.CreateAutoLink(ctx, nil, codeDel, delTarget); err != nil {
+		t.Fatalf("seed auto-dedup for delete test: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE target_url = $1`, delTarget)
+	})
+	if err := s.SoftDeleteLink(ctx, nil, codeDel); err != nil {
+		t.Fatalf("SoftDeleteLink: %v", err)
+	}
+	codeAfterDel := "adr" + suffix
+	after, created, err := s.CreateAutoLink(ctx, nil, codeAfterDel, delTarget)
+	if err != nil {
+		t.Fatalf("CreateAutoLink after soft-delete: %v", err)
+	}
+	if !created {
+		t.Errorf("after soft-delete: created = false, want true")
+	}
+	if after.Code != codeAfterDel {
+		t.Errorf("after.Code = %q, want %q", after.Code, codeAfterDel)
+	}
+}

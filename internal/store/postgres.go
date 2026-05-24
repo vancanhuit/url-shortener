@@ -243,6 +243,44 @@ func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string,
 	return l, nil
 }
 
+// CreateAutoLink atomically inserts a permanent auto-generated link or
+// returns the existing one when a live, permanent auto-dedup row already
+// covers targetURL. The operation is a single
+// INSERT ... ON CONFLICT DO UPDATE RETURNING so it is safe across
+// multiple concurrent replicas with no external locking.
+//
+// created is true when a fresh row was inserted and false when an
+// existing row was returned (dedup hit). ErrCodeTaken is returned when
+// the proposed code collides with a different existing row on the unique
+// code constraint; callers should generate a fresh code and retry.
+func (s *Store) CreateAutoLink(ctx context.Context, db DBTX, code, targetURL string) (Link, bool, error) {
+	if db == nil {
+		db = s.pool
+	}
+	const q = `
+		INSERT INTO links (code, target_url, expires_at, auto_dedup)
+		VALUES ($1, $2, NULL, true)
+		ON CONFLICT (target_url)
+		WHERE auto_dedup = true AND expires_at IS NULL AND deleted_at IS NULL
+		DO UPDATE SET code = links.code
+		RETURNING id, code, target_url, created_at, click_count, expires_at, deleted_at
+	`
+	var l Link
+	err := db.QueryRow(ctx, q, code, targetURL).
+		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+			return Link{}, false, ErrCodeTaken
+		}
+		return Link{}, false, fmt.Errorf("store: create auto link: %w", err)
+	}
+	// A freshly inserted row comes back with the code we proposed.
+	// An ON CONFLICT hit returns the existing row's code instead.
+	created := l.Code == code
+	return l, created, nil
+}
+
 // IncrementClicks bumps the click counter on the link with the given
 // code by one. Best-effort: a missing row returns nil (the caller is
 // the redirect handler, which has already verified the row exists, so
