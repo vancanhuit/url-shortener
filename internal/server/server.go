@@ -310,6 +310,7 @@ func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 		LogLatency:   true,
 		LogRequestID: true,
 		LogRemoteIP:  true,
+		LogUserAgent: true,
 		HandleError:  true,
 		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
 			level := slog.LevelInfo
@@ -327,6 +328,7 @@ func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 				"latency_ms", v.Latency.Milliseconds(),
 				"request_id", v.RequestID,
 				"remote_ip", v.RemoteIP,
+				"user_agent", v.UserAgent,
 			}
 			if v.Error != nil {
 				attrs = append(attrs, "error", v.Error.Error())
