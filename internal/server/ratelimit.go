@@ -1,52 +1,56 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/vancanhuit/url-shortener/internal/config"
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 )
 
-// rateLimitExpiresIn is how long an idle per-IP token bucket survives
-// in the in-memory store before it is evicted. Long enough to keep a
-// returning legitimate user inside their established budget, short
-// enough that a one-off scan from a transient IP doesn't pin memory.
-const rateLimitExpiresIn = 3 * time.Minute
+// rateLimiter is the shared-state backend for the per-IP rate limiter.
+// The production implementation is *cache.Client; tests inject a fake.
+// Callers should allow the request when err is non-nil (fail-open).
+type rateLimiter interface {
+	RateLimit(ctx context.Context, key string, limit int, window time.Duration) (bool, int, error)
+}
+
+// rateLimitKeyPrefix namespaces the per-IP keys so they never collide
+// with the redirect-lookup cache entries written by the handlers layer.
+const rateLimitKeyPrefix = "ratelimit:create:"
 
 // buildCreateRateLimiter returns the middleware list to attach to
 // `POST /api/v1/links`. When cfg.RateLimitRPS is 0 (the default) the
 // returned slice is empty -- rate limiting is fully opt-in.
 //
-// The limiter uses Echo's bundled in-memory store keyed on the real
-// client IP (Context.RealIP, which honors cfg.TrustedProxies). On a
-// deny it returns a 429 with the project's standard JSON error
-// envelope so SPA / API clients can branch on the stable code
-// `rate_limited` rather than parsing prose. ID-extraction failures
-// (which essentially can't happen with the IP extractor) fall through
-// to a 500 with the same envelope.
+// The limiter uses a Redis fixed-window counter (via rl) keyed on the
+// real client IP (Context.RealIP, which honors cfg.TrustedProxies).
+// Because the counter lives in Redis it is shared across all replicas,
+// so the configured RPS budget is enforced globally -- not multiplied
+// by the replica count. On a deny it returns 429 with the project's
+// standard JSON error envelope.
 //
-// Multi-replica deployments share no state across processes here:
-// the limiter is per-instance, so the effective ceiling is N * RPS
-// behind a load balancer with weighted spread. That is intentional
-// for a v1 limiter -- it costs nothing, can't go wrong under network
-// partitions, and is plenty for the threat we care about (a single
-// abuser hammering one node). Promote to Redis when N grows large
-// enough that per-instance budgets stop being meaningful.
-func buildCreateRateLimiter(cfg config.Config, logger *slog.Logger) []echo.MiddlewareFunc {
+// Fail-open: a Redis error is logged and the request is allowed through
+// to avoid turning a cache outage into a service outage.
+//
+// Fixed-window trade-off: at a window boundary a client can observe up
+// to 2 × burst requests. Acceptable for abuse prevention; switch to a
+// sliding-window (sorted-set) implementation if strict per-second
+// budgets are required.
+func buildCreateRateLimiter(cfg config.Config, rl rateLimiter, logger *slog.Logger) []echo.MiddlewareFunc {
 	if cfg.RateLimitRPS <= 0 {
 		return nil
 	}
 
 	burst := cfg.RateLimitBurst
 	if burst <= 0 {
-		// Default burst = 2 * RPS so a legitimate client clicking
+		// Default burst = 2 × RPS so a legitimate client clicking
 		// "create" a couple of times in a row stays inside the
-		// bucket. Floor at 1 so a fractional RPS like 0.5 still
+		// budget. Floor at 1 so a fractional RPS like 0.5 still
 		// admits at least one request.
 		burst = int(cfg.RateLimitRPS * 2)
 		if burst < 1 {
@@ -54,48 +58,45 @@ func buildCreateRateLimiter(cfg config.Config, logger *slog.Logger) []echo.Middl
 		}
 	}
 
-	store := middleware.NewRateLimiterMemoryStoreWithConfig(middleware.RateLimiterMemoryStoreConfig{
-		Rate:      cfg.RateLimitRPS,
-		Burst:     burst,
-		ExpiresIn: rateLimitExpiresIn,
-	})
+	// Fixed window of 1 second: `burst` requests per second per IP.
+	// Using 1 s keeps the key TTL short and keeps the math simple;
+	// the RPS value determines the steady-state budget when burst is
+	// left at its default (2 × RPS) and the operator tunes both.
+	const window = time.Second
 
-	mw, err := middleware.RateLimiterConfig{
-		Store: store,
-		IdentifierExtractor: func(c *echo.Context) (string, error) {
-			return c.RealIP(), nil
-		},
-		ErrorHandler: func(c *echo.Context, err error) error {
-			logger.Warn("rate limiter: identifier extraction failed",
-				"error", err, "remote", c.Request().RemoteAddr)
-			return c.JSON(http.StatusInternalServerError,
-				handlers.ErrorResponse{
-					Error: "internal error",
-					Code:  handlers.ErrCodeInternal,
-				})
-		},
-		DenyHandler: func(c *echo.Context, identifier string, _ error) error {
-			logger.Info("rate limit exceeded",
-				"identifier", identifier,
-				"path", c.Path(),
-				"method", c.Request().Method,
-			)
-			return c.JSON(http.StatusTooManyRequests,
-				handlers.ErrorResponse{
-					Error: "rate limit exceeded",
-					Code:  handlers.ErrCodeRateLimited,
-				})
-		},
-	}.ToMiddleware()
-	if err != nil {
-		// ToMiddleware only errors when the config is incoherent
-		// (e.g. nil Store), all of which are programming bugs in
-		// this constructor. Fail fast at startup.
-		panic("server: build rate limiter: " + err.Error())
+	mw := func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			ip := c.RealIP()
+			key := rateLimitKeyPrefix + ip
+
+			allowed, _, err := rl.RateLimit(c.Request().Context(), key, burst, window)
+			if err != nil {
+				// Redis unavailable: fail open so a cache outage
+				// never becomes a request outage.
+				logger.Warn("rate limiter: backend error, allowing request",
+					"error", err, "ip", ip)
+				return next(c)
+			}
+
+			if !allowed {
+				logger.Info("rate limit exceeded",
+					"identifier", ip,
+					"path", c.Path(),
+					"method", c.Request().Method,
+				)
+				return c.JSON(http.StatusTooManyRequests,
+					handlers.ErrorResponse{
+						Error: "rate limit exceeded",
+						Code:  handlers.ErrCodeRateLimited,
+					})
+			}
+			return next(c)
+		}
 	}
 
 	logger.Info("rate limiter enabled",
 		"endpoint", "POST /api/v1/links",
+		"backend", "redis",
 		"rps", cfg.RateLimitRPS,
 		"burst", burst,
 	)

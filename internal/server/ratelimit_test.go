@@ -1,19 +1,49 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/vancanhuit/url-shortener/internal/config"
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 )
+
+// fakeRateLimiter is a thread-safe in-process rateLimiter that mirrors
+// the fixed-window semantics of cache.Client.RateLimit: the first
+// `limit` calls for a given key are allowed; subsequent calls within
+// the same "window" (no real TTL here -- the counter only resets when
+// resetKey is called) are denied. The TTL is recorded but not acted
+// on, keeping tests deterministic.
+type fakeRateLimiter struct {
+	mu       sync.Mutex
+	counters map[string]int
+}
+
+func newFakeRateLimiter() *fakeRateLimiter {
+	return &fakeRateLimiter{counters: map[string]int{}}
+}
+
+func (f *fakeRateLimiter) RateLimit(_ context.Context, key string, limit int, _ time.Duration) (bool, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.counters[key]++
+	count := f.counters[key]
+	if count > limit {
+		return false, 0, nil
+	}
+	return true, limit - count, nil
+}
 
 // TestBuildCreateRateLimiter_DisabledByDefault: with RateLimitRPS=0
 // the constructor returns no middleware -- the existing
@@ -22,7 +52,8 @@ import (
 func TestBuildCreateRateLimiter_DisabledByDefault(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{} // zero value, RateLimitRPS=0
-	if got := buildCreateRateLimiter(cfg, slog.New(slog.DiscardHandler)); got != nil {
+	// rl is nil intentionally: the function must return before touching it.
+	if got := buildCreateRateLimiter(cfg, nil, slog.New(slog.DiscardHandler)); got != nil {
 		t.Errorf("buildCreateRateLimiter(rps=0) = %d middleware, want nil", len(got))
 	}
 }
@@ -34,7 +65,7 @@ func TestBuildCreateRateLimiter_DisabledByDefault(t *testing.T) {
 func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 2}
-	mws := buildCreateRateLimiter(cfg, slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), slog.New(slog.DiscardHandler))
 	if len(mws) != 1 {
 		t.Fatalf("buildCreateRateLimiter mws = %d, want 1", len(mws))
 	}
@@ -91,7 +122,7 @@ func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 func TestBuildCreateRateLimiter_PerIPIsolation(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 1}
-	mws := buildCreateRateLimiter(cfg, slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), slog.New(slog.DiscardHandler))
 
 	e := echo.New()
 	e.POST("/x", func(c *echo.Context) error {
@@ -126,7 +157,7 @@ func TestBuildCreateRateLimiter_PerIPIsolation(t *testing.T) {
 func TestBuildCreateRateLimiter_BurstDerivedFromRPS(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 0.25, RateLimitBurst: 0}
-	mws := buildCreateRateLimiter(cfg, slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), slog.New(slog.DiscardHandler))
 
 	e := echo.New()
 	e.POST("/x", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) }, mws...)
@@ -138,4 +169,42 @@ func TestBuildCreateRateLimiter_BurstDerivedFromRPS(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Errorf("first call status = %d, want 201 (burst floor of 1 must apply)", rec.Code)
 	}
+}
+
+// TestBuildCreateRateLimiter_FailOpen: when the rate-limiter backend
+// returns an error the middleware must allow the request through
+// (fail-open) so a Redis outage never turns into a service outage.
+func TestBuildCreateRateLimiter_FailOpen(t *testing.T) {
+	t.Parallel()
+
+	errRL := &errorRateLimiter{}
+	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 1}
+	mws := buildCreateRateLimiter(cfg, errRL, slog.New(slog.DiscardHandler))
+
+	e := echo.New()
+	hits := 0
+	e.POST("/x", func(c *echo.Context) error {
+		hits++
+		return c.NoContent(http.StatusCreated)
+	}, mws...)
+
+	for i := range 3 {
+		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(""))
+		req.RemoteAddr = "203.0.113.1:1234"
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Errorf("request %d: status = %d, want 201 (fail-open)", i+1, rec.Code)
+		}
+	}
+	if hits != 3 {
+		t.Errorf("handler invocations = %d, want 3 (all must pass on backend error)", hits)
+	}
+}
+
+// errorRateLimiter always returns an error, simulating a Redis outage.
+type errorRateLimiter struct{}
+
+func (*errorRateLimiter) RateLimit(_ context.Context, _ string, _ int, _ time.Duration) (bool, int, error) {
+	return false, 0, errors.New("simulated redis error")
 }
