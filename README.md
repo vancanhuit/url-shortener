@@ -134,7 +134,7 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_LOG_FORMAT`     | `text` in dev, `json` in prod | `text` (human-readable) or `json` (structured).     |
 | `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | **Required.** Postgres connection string. Redacted when printed. |
 | `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | **Required.** Redis connection string. Redacted when printed.   |
-| `URL_SHORTENER_AUTO_MIGRATE`   | `false`                       | When `true`, `run` applies migrations before serving. Convenient for local dev / single-replica CI; production deployments should leave this off and run `migrate up` as a separate step. |
+| `URL_SHORTENER_AUTO_MIGRATE`   | `true`                        | When `true` (the default), `run` applies any pending migrations before serving. A Postgres advisory lock serializes concurrent startup across replicas. Set to `false` to run `migrate up` as an explicit, separately-audited step. |
 | `URL_SHORTENER_CODE_LENGTH`    | `7`                           | Length of auto-generated short codes (base62). Must be in [4, 64]. |
 | `URL_SHORTENER_DB_MAX_CONNS`           | _(pgx default: max(4, NumCPU))_ | Upper bound on simultaneous Postgres connections. Set above the default to absorb burst load without queueing requests on the pool. |
 | `URL_SHORTENER_DB_MIN_CONNS`           | _(pgx default: 0)_              | Idle connections kept warm. Useful to amortize TLS/handshake cost on bursty workloads. |

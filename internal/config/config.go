@@ -51,11 +51,13 @@ type Config struct {
 	// Redacted() and by the JSON marshaller.
 	RedisURL string `mapstructure:"redis_url"    json:"redis_url"`
 
-	// AutoMigrate, when true, makes `run` apply pending migrations before
-	// starting the HTTP server. Convenient for local dev and CI where there
-	// is exactly one process; production deployments should keep this false
-	// and run `migrate up` as a separate one-shot step (avoids races between
-	// replicas).
+	// AutoMigrate, when true (the default), makes `run` apply any pending
+	// migrations before starting the HTTP server. The migration path uses a
+	// Postgres session-level advisory lock, so multiple replicas starting
+	// simultaneously are safe: the first to acquire the lock applies all
+	// pending migrations; the others wait, then see no pending work and
+	// continue. Set to false when you prefer to run `migrate up` as an
+	// explicit, separately-audited step outside the application process.
 	AutoMigrate bool `mapstructure:"auto_migrate" json:"auto_migrate"`
 
 	// CodeLength is the length of auto-generated short codes. Validated by
@@ -157,6 +159,7 @@ func Load() (Config, error) {
 	v.SetDefault("addr", ":8080")
 	v.SetDefault("base_url", "http://localhost:8080")
 	v.SetDefault("log_level", "info")
+	v.SetDefault("auto_migrate", true)
 	v.SetDefault("code_length", 7)
 	// log_format default is decided after env is known (text in dev, json in prod).
 

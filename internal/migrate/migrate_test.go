@@ -1,21 +1,36 @@
 package migrate
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vancanhuit/url-shortener/migrations"
 )
 
-func TestLatestEmbeddedVersion(t *testing.T) {
+// TestEmbeddedMigrationsFS verifies that the embedded migrations FS is
+// readable and contains the expected number of SQL files. This catches
+// accidental deletion or embed-directive omissions without needing a DB.
+func TestEmbeddedMigrationsFS(t *testing.T) {
 	t.Parallel()
 
-	got, err := latestEmbeddedVersion()
+	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
-		t.Fatalf("latestEmbeddedVersion() error = %v", err)
+		t.Fatalf("fs.ReadDir: %v", err)
 	}
-	if got != 5 {
-		t.Fatalf("latestEmbeddedVersion() = %d, want 5", got)
+
+	var sqlFiles []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			sqlFiles = append(sqlFiles, e.Name())
+		}
+	}
+	const wantCount = 5
+	if len(sqlFiles) != wantCount {
+		t.Fatalf("embedded SQL migration count = %d, want %d (files: %v)",
+			len(sqlFiles), wantCount, sqlFiles)
 	}
 }
 
