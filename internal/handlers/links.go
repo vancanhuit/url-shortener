@@ -113,13 +113,14 @@ type Generator interface {
 // are required: the cache is on the redirect hot path and the service
 // configuration enforces a non-empty URL_SHORTENER_REDIS_URL.
 type Links struct {
-	store    LinkStore
-	cache    LinkCache
-	gen      Generator
-	baseURL  string
-	logger   *slog.Logger
-	cacheTTL time.Duration
-	retries  int
+	store       LinkStore
+	cache       LinkCache
+	gen         Generator
+	baseURL     string
+	logger      *slog.Logger
+	cacheTTL    time.Duration
+	negCacheTTL time.Duration
+	retries     int
 
 	// bgWG tracks fire-and-forget goroutines (currently just the
 	// click-increment background work). Tests use
@@ -132,12 +133,16 @@ type Links struct {
 // LinksConfig groups Links' constructor arguments. Store, Cache, and
 // Generator are all required; baseURL is the public origin used when
 // rendering `short_url` in responses; Logger defaults to slog.Default.
+// CacheTTL and NegativeCacheTTL are optional: zero means use the
+// package-level defaults (CacheTTL and NegativeCacheTTL constants).
 type LinksConfig struct {
-	Store     LinkStore
-	Cache     LinkCache
-	Generator Generator
-	BaseURL   string
-	Logger    *slog.Logger
+	Store            LinkStore
+	Cache            LinkCache
+	Generator        Generator
+	BaseURL          string
+	Logger           *slog.Logger
+	CacheTTL         time.Duration
+	NegativeCacheTTL time.Duration
 }
 
 // NewLinks builds a Links handler. Required: Store, Generator, BaseURL.
@@ -146,14 +151,23 @@ func NewLinks(cfg LinksConfig) *Links {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cacheTTL := cfg.CacheTTL
+	if cacheTTL <= 0 {
+		cacheTTL = CacheTTL
+	}
+	negCacheTTL := cfg.NegativeCacheTTL
+	if negCacheTTL <= 0 {
+		negCacheTTL = NegativeCacheTTL
+	}
 	return &Links{
-		store:    cfg.Store,
-		cache:    cfg.Cache,
-		gen:      cfg.Generator,
-		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
-		logger:   logger,
-		cacheTTL: CacheTTL,
-		retries:  CreateMaxRetries,
+		store:       cfg.Store,
+		cache:       cfg.Cache,
+		gen:         cfg.Generator,
+		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		logger:      logger,
+		cacheTTL:    cacheTTL,
+		negCacheTTL: negCacheTTL,
+		retries:     CreateMaxRetries,
 	}
 }
 
@@ -743,7 +757,7 @@ func (h *Links) cacheGet(ctx context.Context, code string) (target string, hit b
 // a Postgres lookup. Failures are logged and ignored: the negative
 // cache is a defense-in-depth optimization, never a correctness gate.
 func (h *Links) cachePutNegative(ctx context.Context, code string) {
-	if err := h.cache.Set(ctx, cacheKey(code), cacheNegativeSentinel, NegativeCacheTTL); err != nil {
+	if err := h.cache.Set(ctx, cacheKey(code), cacheNegativeSentinel, h.negCacheTTL); err != nil {
 		h.logger.Warn("links: negative cache set failed", "error", err, "code", code)
 	}
 }

@@ -249,6 +249,27 @@ func newHandlerWithCache(t *testing.T, st handlers.LinkStore, cc handlers.LinkCa
 	return e, h
 }
 
+func newHandlerWithTTLs(
+	t *testing.T,
+	st handlers.LinkStore,
+	cc handlers.LinkCache,
+	gen handlers.Generator,
+	cacheTTL, negCacheTTL time.Duration,
+) (*echo.Echo, *handlers.Links) {
+	t.Helper()
+	h := handlers.NewLinks(handlers.LinksConfig{
+		Store:            st,
+		Cache:            cc,
+		Generator:        gen,
+		BaseURL:          baseURL,
+		CacheTTL:         cacheTTL,
+		NegativeCacheTTL: negCacheTTL,
+	})
+	e := echo.New()
+	h.Mount(e)
+	return e, h
+}
+
 func doJSON(t *testing.T, e *echo.Echo, method, path, body string) (*httptest.ResponseRecorder, []byte) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -681,6 +702,26 @@ func TestRedirect_UnknownCodePopulatesNegativeCache(t *testing.T) {
 	}
 	if st.getByCode != before {
 		t.Errorf("second request hit the store: getByCode %d -> %d", before, st.getByCode)
+	}
+}
+
+// TestRedirect_ConfiguredNegativeCacheTTLIsUsed: when LinksConfig.NegativeCacheTTL
+// is set, that value (not the package-level default) is used as the TTL
+// for negative cache entries written on a store miss.
+func TestRedirect_ConfiguredNegativeCacheTTLIsUsed(t *testing.T) {
+	t.Parallel()
+	st, cc := newFakeStore(), newFakeCache()
+	customTTL := 5 * time.Minute
+	e, _ := newHandlerWithTTLs(t, st, cc, &scriptedGen{}, 0, customTTL)
+
+	req := httptest.NewRequest(http.MethodGet, "/r/missing2", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if got := cc.ttls["link:missing2"]; got != customTTL {
+		t.Errorf("negative cache TTL = %v, want %v", got, customTTL)
 	}
 }
 

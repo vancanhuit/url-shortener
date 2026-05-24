@@ -137,11 +137,13 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	// the abuse-prone POST /api/v1/links endpoint and is keyed on the
 	// real client IP (already correct via cfg.TrustedProxies above).
 	links := handlers.NewLinks(handlers.LinksConfig{
-		Store:     deps.Store,
-		Cache:     deps.Cache,
-		Generator: deps.Generator,
-		BaseURL:   cfg.BaseURL,
-		Logger:    logger,
+		Store:            deps.Store,
+		Cache:            deps.Cache,
+		Generator:        deps.Generator,
+		BaseURL:          cfg.BaseURL,
+		Logger:           logger,
+		CacheTTL:         cfg.CacheTTL,
+		NegativeCacheTTL: cfg.NegativeCacheTTL,
 	})
 	createMW := buildCreateRateLimiter(cfg, logger)
 	links.Mount(e, createMW...)

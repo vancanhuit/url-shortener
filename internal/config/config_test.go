@@ -375,3 +375,39 @@ func clearEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_CacheTTLEnvOverrides(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
+	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("URL_SHORTENER_CACHE_TTL", "2h")
+	t.Setenv("URL_SHORTENER_NEGATIVE_CACHE_TTL", "1m")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	if cfg.CacheTTL != 2*time.Hour {
+		t.Errorf("CacheTTL = %v, want 2h", cfg.CacheTTL)
+	}
+	if cfg.NegativeCacheTTL != time.Minute {
+		t.Errorf("NegativeCacheTTL = %v, want 1m", cfg.NegativeCacheTTL)
+	}
+}
+
+func TestLoad_CacheTTLDefaultsToZero(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
+	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	if cfg.CacheTTL != 0 {
+		t.Errorf("CacheTTL = %v, want 0 (use handler default)", cfg.CacheTTL)
+	}
+	if cfg.NegativeCacheTTL != 0 {
+		t.Errorf("NegativeCacheTTL = %v, want 0 (use handler default)", cfg.NegativeCacheTTL)
+	}
+}

@@ -147,6 +147,8 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_RATE_LIMIT_RPS` | `0`                           | When `> 0`, enables an in-memory per-IP rate limiter on `POST /api/v1/links` at the given steady-state requests-per-second budget. `0` (the default) disables rate limiting; deployments fronted by an upstream limiter typically leave this off. Per-IP keying uses `URL_SHORTENER_TRUSTED_PROXIES` for XFF resolution. |
 | `URL_SHORTENER_RATE_LIMIT_BURST` | _(2 &times; RPS, min 1)_    | Token-bucket capacity for the rate limiter. `0` means "derive from `URL_SHORTENER_RATE_LIMIT_RPS`". Ignored when `RATE_LIMIT_RPS=0`. |
 | `URL_SHORTENER_CORS_ALLOWED_ORIGINS` | _(empty)_               | Comma-separated allow-list of cross-origin browser callers (e.g. `https://app.example.com,https://status.example.com`). Each entry must be `*` or an absolute `scheme://host[:port]` URL -- typos like `example.com` (no scheme) are rejected at startup. Empty (the default) leaves CORS off, which is correct for the same-origin SPA + API deployment this project ships. |
+| `URL_SHORTENER_CACHE_TTL`            | `1h`                    | How long a positive redirect lookup is cached in Redis. Accepts Go duration syntax (e.g. `30m`, `2h`). `0` uses the default. |
+| `URL_SHORTENER_NEGATIVE_CACHE_TTL`   | `30s`                   | How long a "not found / gone" answer for `/r/:code` is held in Redis before re-checking Postgres. Short on purpose: absorbs scanning attacks without masking legitimate state changes. Accepts Go duration syntax. `0` uses the default. |
 
 Pool tunables are zero by default, in which case pgx's own defaults apply.
 Production deployments behind a fronting proxy (PgBouncer, RDS Proxy)
@@ -155,6 +157,23 @@ backend cap and `DB_MAX_CONN_LIFETIME` lowered to a few minutes.
 
 Run `url-shortener config` to print the fully resolved configuration with
 passwords replaced by `REDACTED`.
+
+## Security headers
+
+Every HTTP response carries the following security headers regardless of
+whether TLS is in use:
+
+| Header | Value |
+| ------ | ----- |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `X-XSS-Protection` | `1; mode=block` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` (HTTPS requests only) |
+
+HSTS is only emitted when the request arrives over TLS (direct or via a
+proxy that sets `X-Forwarded-Proto: https`), so plain-HTTP deployments
+behind a reverse proxy are not affected.
 
 ## API
 
