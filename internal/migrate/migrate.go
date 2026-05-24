@@ -109,7 +109,7 @@ func Create(dir, name string) (string, error) {
 	filename := fmt.Sprintf("%05d_%s.sql", next, name)
 	path := filepath.Join(dir, filename)
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // path is constructed from a user-supplied migration name
 	if err != nil {
 		return "", fmt.Errorf("migrate: create file: %w", err)
 	}
@@ -129,7 +129,7 @@ func nextVersion(dir string) (int64, error) {
 		return 0, fmt.Errorf("migrate: read dir %q: %w", dir, err)
 	}
 
-	var max int64
+	var maxVer int64
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
@@ -138,11 +138,11 @@ func nextVersion(dir string) (int64, error) {
 		if err != nil {
 			continue // skip files that don't match the pattern
 		}
-		if v > max {
-			max = v
+		if v > maxVer {
+			maxVer = v
 		}
 	}
-	return max + 1, nil
+	return maxVer + 1, nil
 }
 
 func latestEmbeddedVersion() (int64, error) {
