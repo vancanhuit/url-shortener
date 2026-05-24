@@ -104,6 +104,18 @@ export async function listLinks(params: ListLinksParams = {}): Promise<ListLinks
   return (await resp.json()) as ListLinksResponse;
 }
 
+export interface VersionInfo {
+  version: string;
+  commit: string;
+  date: string;
+}
+
+export async function getVersion(): Promise<VersionInfo> {
+  const resp = await fetch("/version");
+  if (!resp.ok) throw await asApiError(resp);
+  return (await resp.json()) as VersionInfo;
+}
+
 /**
  * Type-guard for `ApiError` values. Useful in catch blocks where
  * `unknown` is the inferred error type under TypeScript strict mode.

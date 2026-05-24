@@ -114,6 +114,33 @@ run *ARGS:
 version:
     @go run ./cmd/url-shortener version 2>/dev/null || echo "Version (resolved): {{ VERSION }}"
 
+# Bring up the dev stack (db + redis + server) with build metadata injected
+# from the current git state, so /version reports the real revision.
+# Extra flags are forwarded: e.g. `just up -d --build --wait`.
+[group("dev")]
+up *ARGS:
+    VERSION="{{ VERSION }}" COMMIT="{{ COMMIT }}" DATE="{{ DATE }}" docker compose --profile=dev up {{ ARGS }}
+
+# Bring up the TLS stack (db + redis + server-tls on :8443) with build
+# metadata injected from the current git state. Requires certs in
+# dev/certs/ -- run `just dev-certs` once to generate them.
+# Extra flags are forwarded: e.g. `just up-tls -d --build --wait`.
+[group("dev")]
+up-tls *ARGS:
+    VERSION="{{ VERSION }}" COMMIT="{{ COMMIT }}" DATE="{{ DATE }}" docker compose --profile=tls up {{ ARGS }}
+
+# Tear down the dev stack and remove volumes.
+# Extra flags are forwarded: e.g. `just down -v`.
+[group("dev")]
+down *ARGS:
+    docker compose --profile=dev down {{ ARGS }}
+
+# Tear down the TLS stack and remove volumes.
+# Extra flags are forwarded: e.g. `just down-tls -v`.
+[group("dev")]
+down-tls *ARGS:
+    docker compose --profile=tls down {{ ARGS }}
+
 # Generate a host-trusted dev TLS cert + key into dev/certs/ via mkcert.
 # Both files are gitignored; every contributor regenerates locally.
 #
