@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -86,5 +87,27 @@ func TestSecureHeaders_HSTSViaXForwardedProto(t *testing.T) {
 	wantPrefix := "max-age=63072000"
 	if len(hsts) < len(wantPrefix) || hsts[:len(wantPrefix)] != wantPrefix {
 		t.Errorf("Strict-Transport-Security = %q, want prefix %q", hsts, wantPrefix)
+	}
+}
+
+// TestSecureHeaders_CSP verifies that every response carries a
+// Content-Security-Policy header and that it contains the core
+// directives that guard against XSS and clickjacking.
+func TestSecureHeaders_CSP(t *testing.T) {
+	t.Parallel()
+	rec := doPlainRequest(t, newSecureEchoForTest(t))
+	got := rec.Header().Get("Content-Security-Policy")
+	if got == "" {
+		t.Fatal("Content-Security-Policy header missing")
+	}
+	for _, want := range []string{
+		"default-src 'self'",
+		"script-src 'self'",
+		"frame-ancestors 'none'",
+		"object-src 'none'",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Content-Security-Policy missing directive %q; got: %s", want, got)
+		}
 	}
 }
