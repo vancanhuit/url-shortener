@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { getLink, deleteLink, isApiError, type Link } from "./api";
   import { humanExpiry, plural } from "./time";
+  import IconTrash from "./icons/IconTrash.svelte";
 
   interface Props {
     link: Link;
@@ -80,8 +81,7 @@
     class="font-mono text-sm text-indigo-600 hover:underline shrink-0 dark:text-indigo-400"
     >{current.short_url}</a
   >
-  <span
-    class="truncate text-xs sm:text-sm text-slate-500 flex-1 min-w-0 dark:text-slate-400"
+  <span class="truncate text-xs sm:text-sm text-slate-500 flex-1 min-w-0 dark:text-slate-400"
     >{current.target_url}</span
   >
   <span class="shrink-0 inline-flex flex-wrap items-center gap-1.5 text-xs">
@@ -105,9 +105,13 @@
       onclick={handleDelete}
       disabled={deleting}
       aria-label="Delete /{current.code}"
-      class="rounded-full px-2 py-0.5 font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:text-slate-400 dark:hover:text-rose-300 dark:hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      class="rounded-full p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:text-slate-400 dark:hover:text-rose-300 dark:hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      {deleting ? "…" : "Delete"}
+      {#if deleting}
+        <span class="px-1 py-0.5 text-xs font-medium">…</span>
+      {:else}
+        <IconTrash />
+      {/if}
     </button>
   </span>
 </li>

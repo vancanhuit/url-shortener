@@ -97,6 +97,11 @@ linters:
     misspell:
       locale: US
   exclusions:
+    paths:
+      # npm packages occasionally ship Go source (e.g. flatted); exclude
+      # the entire node_modules tree so vendored third-party Go files are
+      # never analysed.
+      - web/node_modules
     rules:
       # Test fixtures often embed fake URLs/passwords; gosec G101 noise.
       # Tests are also free to use httptest.NewRequest / http.Get / net.Listen

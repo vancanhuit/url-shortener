@@ -6,6 +6,8 @@
   import LinkError from "./lib/LinkError.svelte";
   import RecentList from "./lib/RecentList.svelte";
   import ThemeToggle from "./lib/ThemeToggle.svelte";
+  import IconLink from "./lib/icons/IconLink.svelte";
+  import Footer from "./lib/Footer.svelte";
 
   let items: Link[] = $state([]);
   let nextCursor: number | null = $state(null);
@@ -75,18 +77,7 @@
       aria-hidden="true"
       class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm ring-1 ring-indigo-500/20 dark:ring-indigo-400/30"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="h-5 w-5"
-      >
-        <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5" />
-        <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5" />
-      </svg>
+      <IconLink />
     </span>
     <div class="flex-1 min-w-0">
       <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">URL Shortener</h1>
@@ -117,54 +108,4 @@
   </main>
 </div>
 
-<footer
-  class="border-t border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur"
->
-  <div
-    class="mx-auto max-w-2xl px-4 sm:px-6 py-5 text-xs sm:text-sm text-slate-500 dark:text-slate-400 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-  >
-    <p>Built with</p>
-    <ul class="flex flex-wrap items-center gap-x-4 gap-y-1">
-      <li>
-        <a
-          href="https://go.dev"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="font-medium text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 underline-offset-4 hover:underline transition-colors"
-          >Go</a
-        >
-      </li>
-      <li>
-        <a
-          href="https://svelte.dev"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="font-medium text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 underline-offset-4 hover:underline transition-colors"
-          >Svelte</a
-        >
-      </li>
-      <li>
-        <a
-          href="https://vite.dev"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="font-medium text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 underline-offset-4 hover:underline transition-colors"
-          >Vite</a
-        >
-      </li>
-      <li>
-        <a
-          href="https://tailwindcss.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="font-medium text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 underline-offset-4 hover:underline transition-colors"
-          >Tailwind CSS</a
-        >
-      </li>
-      {#if version}
-        <li aria-hidden="true" class="text-slate-300 dark:text-slate-600 select-none">&middot;</li>
-        <li><span class="font-mono">{version}</span></li>
-      {/if}
-    </ul>
-  </div>
-</footer>
+<Footer {version} />

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { humanExpiry } from "./time";
   import type { Link } from "./api";
+  import IconCheck from "./icons/IconCheck.svelte";
 
   interface Props {
     link: Link;
@@ -32,18 +33,7 @@
   class="rounded-xl bg-emerald-50 p-4 sm:p-5 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:ring-emerald-500/30"
 >
   <div class="flex items-center gap-2">
-    <svg
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      aria-hidden="true"
-      class="h-4 w-4 text-emerald-600 dark:text-emerald-400"
-    >
-      <path
-        fill-rule="evenodd"
-        d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4Z"
-        clip-rule="evenodd"
-      />
-    </svg>
+    <IconCheck />
     <p class="text-sm font-medium text-emerald-700 dark:text-emerald-300">Created.</p>
   </div>
   <div class="mt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">

@@ -122,10 +122,18 @@ export async function getVersion(): Promise<VersionInfo> {
  */
 export function isApiError(err: unknown): err is ApiError {
   return (
-    typeof err === "object" &&
-    err !== null &&
-    "status" in err &&
-    "code" in err &&
-    "message" in err
+    typeof err === "object" && err !== null && "status" in err && "code" in err && "message" in err
   );
+}
+
+/**
+ * Translate an API error (or any thrown value) into a user-facing message.
+ * Well-known error codes are mapped to friendly strings; everything else
+ * falls back to the server's `message` field or a generic fallback.
+ */
+export function friendlyError(err: unknown): string {
+  if (!isApiError(err)) return "Request failed.";
+  if (err.code === "code_taken") return "That code is already in use.";
+  if (err.code === "internal_error") return "Something went wrong. Try again.";
+  return err.message || "Request failed.";
 }
