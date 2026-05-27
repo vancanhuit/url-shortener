@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createLink, isApiError, type Link } from "./api";
+  import { createLink, friendlyError, type Link } from "./api";
   import { EXPIRES_PRESETS, resolveExpiresAt } from "./expires";
 
   interface Props {
@@ -32,22 +32,10 @@
       });
       await onSuccess(result);
     } catch (err) {
-      onFailure({ message: friendlyMessage(err) });
+      onFailure({ message: friendlyError(err) });
     } finally {
       pending = false;
     }
-  }
-
-  /**
-   * Translate an `ApiError` into the user-facing message strings the
-   * old Go HTML route produced. Anything outside the well-known set
-   * falls back to the server's `message` field.
-   */
-  function friendlyMessage(err: unknown): string {
-    if (!isApiError(err)) return "Request failed.";
-    if (err.code === "code_taken") return "That code is already in use.";
-    if (err.code === "internal_error") return "Something went wrong. Try again.";
-    return err.message || "Request failed.";
   }
 </script>
 

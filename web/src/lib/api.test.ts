@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteLink, isApiError, listLinks } from "./api";
+import { deleteLink, friendlyError, isApiError, listLinks } from "./api";
 import type { Mock } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -104,5 +104,43 @@ describe("deleteLink", () => {
   it("throws an ApiError on other non-2xx responses", async () => {
     respondWith(500, { code: "internal_error", message: "server error" });
     await expect(deleteLink("abc")).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// friendlyError — user-facing message mapping
+// ---------------------------------------------------------------------------
+
+describe("friendlyError", () => {
+  it("returns 'Request failed.' for null", () => {
+    expect(friendlyError(null)).toBe("Request failed.");
+  });
+
+  it("returns 'Request failed.' for a plain Error instance", () => {
+    expect(friendlyError(new Error("boom"))).toBe("Request failed.");
+  });
+
+  it("returns a friendly message for code_taken", () => {
+    expect(friendlyError({ status: 409, code: "code_taken", message: "taken" })).toBe(
+      "That code is already in use."
+    );
+  });
+
+  it("returns a friendly message for internal_error", () => {
+    expect(friendlyError({ status: 500, code: "internal_error", message: "error" })).toBe(
+      "Something went wrong. Try again."
+    );
+  });
+
+  it("returns the server message for unknown codes", () => {
+    expect(friendlyError({ status: 400, code: "bad_request", message: "Bad request" })).toBe(
+      "Bad request"
+    );
+  });
+
+  it("falls back to 'Request failed.' when the server message is empty", () => {
+    expect(friendlyError({ status: 400, code: "bad_request", message: "" })).toBe(
+      "Request failed."
+    );
   });
 });
