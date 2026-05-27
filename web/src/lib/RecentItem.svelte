@@ -2,15 +2,13 @@
   import { deleteLink, type Link } from "./api";
   import { humanExpiry, plural } from "./time";
   import IconTrash from "./icons/IconTrash.svelte";
+  import { linksStore } from "./links.svelte";
 
   interface Props {
     link: Link;
-    onDeleted: (code: string) => void | Promise<void>;
   }
-  const { link, onDeleted }: Props = $props();
+  const { link }: Props = $props();
 
-  // svelte-ignore state_referenced_locally
-  let current: Link = $state({ ...link });
   let deleting = $state(false);
   let confirmPending = $state(false);
 
@@ -19,36 +17,36 @@
     deleting = true;
     confirmPending = false;
     try {
-      await deleteLink(current.code);
-      await onDeleted(current.code);
+      await deleteLink(link.code);
+      linksStore.removeItem(link.code);
     } catch (err) {
       console.warn("delete failed", err);
       deleting = false;
     }
   }
 
-  let expiry = $derived(humanExpiry(current.expires_at));
+  let expiry = $derived(humanExpiry(link.expires_at));
 </script>
 
 <li
   class="rounded-xl bg-white px-3 py-2.5 sm:px-4 ring-1 ring-slate-200 hover:ring-slate-300 dark:bg-slate-900 dark:ring-slate-800 dark:hover:ring-slate-700 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3"
 >
   <a
-    href={current.short_url}
+    href={link.short_url}
     target="_blank"
     rel="noopener"
     class="font-mono text-sm text-indigo-600 hover:underline shrink-0 dark:text-indigo-400"
-    >{current.short_url}</a
+    >{link.short_url}</a
   >
   <span class="truncate text-xs sm:text-sm text-slate-500 flex-1 min-w-0 dark:text-slate-400"
-    >{current.target_url}</span
+    >{link.target_url}</span
   >
   <span class="shrink-0 inline-flex flex-wrap items-center gap-1.5 text-xs">
     <span
       class="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-      title="{current.click_count} click{plural(current.click_count)}"
+      title="{link.click_count} click{plural(link.click_count)}"
     >
-      {current.click_count} click{plural(current.click_count)}
+      {link.click_count} click{plural(link.click_count)}
     </span>
     {#if expiry}
       <span
@@ -83,7 +81,7 @@
         type="button"
         onclick={() => (confirmPending = true)}
         disabled={deleting}
-        aria-label="Delete /{current.code}"
+        aria-label="Delete /{link.code}"
         class="rounded-full p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:text-slate-400 dark:hover:text-rose-300 dark:hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <IconTrash />
