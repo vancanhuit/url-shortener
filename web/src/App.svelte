@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { getVersion, type Link } from "./lib/api";
   import { linksStore } from "./lib/links.svelte";
   import LinkForm from "./lib/LinkForm.svelte";
@@ -17,12 +17,17 @@
 
   onMount(async () => {
     await linksStore.loadFirstPage();
+    linksStore.startPolling();
     try {
       const info = await getVersion();
       version = info.version;
     } catch {
       // Version fetch is best-effort; don't surface failures to the user.
     }
+  });
+
+  onDestroy(() => {
+    linksStore.stopPolling();
   });
 
   async function onCreated(payload: { link: Link; created: boolean }): Promise<void> {
