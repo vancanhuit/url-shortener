@@ -155,6 +155,8 @@ jobs:
         run: just web-fmt-check
       - name: just web-lint
         run: just web-lint
+      - name: just web-test
+        run: just web-test
       - name: just web-check
         run: just web-check
 
