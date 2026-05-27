@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
-  import { getLink, deleteLink, isApiError, type Link } from "./api";
+  import { deleteLink, type Link } from "./api";
   import { humanExpiry, plural } from "./time";
   import IconTrash from "./icons/IconTrash.svelte";
 
@@ -10,57 +9,17 @@
   }
   const { link, onDeleted }: Props = $props();
 
-  // Local copy so the row can refresh its click count + (eventually
-  // soft-deleted) state without round-tripping through the parent.
-  // The component is keyed by `link.code`, so we never need to react
-  // to prop mutations: a delete unmounts the row, a fresh first-page
-  // fetch swaps in a new instance. Hence we deliberately seed local
-  // state from the prop once and ignore Svelte's locally-referenced
-  // warning for this seed-only pattern.
   // svelte-ignore state_referenced_locally
   let current: Link = $state({ ...link });
   let deleting = $state(false);
-
-  // Periodic poll for click-count + expiry updates. The Go-side
-  // template used to do this with htmx; the Svelte translation just
-  // re-fetches the same JSON shape on the same cadence.
-  const POLL_INTERVAL_MS = 5_000;
-  let timer: number | undefined;
-
-  async function refresh(): Promise<void> {
-    try {
-      current = await getLink(current.code);
-    } catch (err) {
-      // 410 (link_expired / link_deleted) and 404 are terminal --
-      // stop polling once we've seen them; the parent re-fetches
-      // the recent list on its own cadence to drop the row.
-      if (isApiError(err) && (err.status === 404 || err.status === 410)) {
-        stopPolling();
-      }
-    }
-  }
-
-  function startPolling(): void {
-    timer = window.setInterval(refresh, POLL_INTERVAL_MS);
-  }
-
-  function stopPolling(): void {
-    if (timer !== undefined) {
-      window.clearInterval(timer);
-      timer = undefined;
-    }
-  }
-
-  onMount(startPolling);
-  onDestroy(stopPolling);
+  let confirmPending = $state(false);
 
   async function handleDelete(): Promise<void> {
     if (deleting) return;
-    if (!window.confirm(`Delete /${current.code}?`)) return;
     deleting = true;
+    confirmPending = false;
     try {
       await deleteLink(current.code);
-      stopPolling();
       await onDeleted(current.code);
     } catch (err) {
       console.warn("delete failed", err);
@@ -100,18 +59,35 @@
         {expiry}
       </span>
     {/if}
-    <button
-      type="button"
-      onclick={handleDelete}
-      disabled={deleting}
-      aria-label="Delete /{current.code}"
-      class="rounded-full p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:text-slate-400 dark:hover:text-rose-300 dark:hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {#if deleting}
-        <span class="px-1 py-0.5 text-xs font-medium">…</span>
-      {:else}
+    {#if confirmPending}
+      <span class="inline-flex items-center gap-1.5">
+        <button
+          type="button"
+          onclick={handleDelete}
+          disabled={deleting}
+          class="rounded-full px-2 py-0.5 text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 dark:bg-rose-500 dark:hover:bg-rose-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {deleting ? "…" : "Confirm"}
+        </button>
+        <button
+          type="button"
+          onclick={() => (confirmPending = false)}
+          disabled={deleting}
+          class="rounded-full px-2 py-0.5 text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 transition-colors"
+        >
+          Cancel
+        </button>
+      </span>
+    {:else}
+      <button
+        type="button"
+        onclick={() => (confirmPending = true)}
+        disabled={deleting}
+        aria-label="Delete /{current.code}"
+        class="rounded-full p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:text-slate-400 dark:hover:text-rose-300 dark:hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
         <IconTrash />
-      {/if}
-    </button>
+      </button>
+    {/if}
   </span>
 </li>
