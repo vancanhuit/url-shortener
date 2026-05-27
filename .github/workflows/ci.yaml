@@ -153,6 +153,8 @@ jobs:
           go-cache: "false"
       - name: just web-fmt-check
         run: just web-fmt-check
+      - name: just web-lint
+        run: just web-lint
       - name: just web-check
         run: just web-check
 

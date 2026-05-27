@@ -116,6 +116,12 @@ web-fmt: web-install
 web-fmt-check: web-install
     npm run fmt:check
 
+# Lint the web SPA with ESLint.
+[group("lint")]
+[working-directory("web")]
+web-lint: web-install
+    npm run lint:js
+
 # Run the binary locally.
 [group("dev")]
 run *ARGS:
