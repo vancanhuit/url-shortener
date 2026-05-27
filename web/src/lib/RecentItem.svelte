@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { getLink, deleteLink, isApiError, type Link } from "./api";
   import { humanExpiry, plural } from "./time";
+  import IconTrash from "./icons/IconTrash.svelte";
 
   interface Props {
     link: Link;
@@ -104,9 +105,13 @@
       onclick={handleDelete}
       disabled={deleting}
       aria-label="Delete /{current.code}"
-      class="rounded-full px-2 py-0.5 font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:text-slate-400 dark:hover:text-rose-300 dark:hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      class="rounded-full p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:text-slate-400 dark:hover:text-rose-300 dark:hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      {deleting ? "…" : "Delete"}
+      {#if deleting}
+        <span class="px-1 py-0.5 text-xs font-medium">…</span>
+      {:else}
+        <IconTrash />
+      {/if}
     </button>
   </span>
 </li>

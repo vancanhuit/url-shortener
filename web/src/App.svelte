@@ -6,6 +6,7 @@
   import LinkError from "./lib/LinkError.svelte";
   import RecentList from "./lib/RecentList.svelte";
   import ThemeToggle from "./lib/ThemeToggle.svelte";
+  import IconLink from "./lib/icons/IconLink.svelte";
 
   let items: Link[] = $state([]);
   let nextCursor: number | null = $state(null);
@@ -75,18 +76,7 @@
       aria-hidden="true"
       class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm ring-1 ring-indigo-500/20 dark:ring-indigo-400/30"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="h-5 w-5"
-      >
-        <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5" />
-        <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5" />
-      </svg>
+      <IconLink />
     </span>
     <div class="flex-1 min-w-0">
       <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">URL Shortener</h1>
