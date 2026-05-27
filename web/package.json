@@ -31,13 +31,13 @@
     "prettier": "^3.5.3",
     "prettier-plugin-svelte": "^4.0.1",
     "redoc": "^2.5.2",
-    "svelte": "^5.55.7",
+    "svelte": "^5.55.9",
     "svelte-check": "^4.4.8",
     "swagger-ui-dist": "^5.32.6",
     "tailwindcss": "^4.2.4",
     "typescript": "^6.0.3",
+    "vite": "^8.0.14",
     "typescript-eslint": "^8.33.1",
-    "vite": "^8.0.13",
     "vitest": "^4.1.7"
   }
 }
