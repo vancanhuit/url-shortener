@@ -10,12 +10,16 @@
     "prebuild": "npm run vendor:docs",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check ."
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.3.0",
     "@tsconfig/svelte": "^5.0.8",
+    "prettier": "^3.5.3",
+    "prettier-plugin-svelte": "^4.0.1",
     "redoc": "^2.5.2",
     "svelte": "^5.55.7",
     "svelte-check": "^4.4.8",

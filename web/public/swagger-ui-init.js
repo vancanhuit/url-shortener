@@ -7,10 +7,7 @@ window.addEventListener("load", function () {
     dom_id: "#swagger-ui",
     deepLinking: true,
     tryItOutEnabled: true,
-    presets: [
-      SwaggerUIBundle.presets.apis,
-      SwaggerUIStandalonePreset,
-    ],
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
     layout: "StandaloneLayout",
   });
 });

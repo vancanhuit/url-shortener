@@ -122,10 +122,6 @@ export async function getVersion(): Promise<VersionInfo> {
  */
 export function isApiError(err: unknown): err is ApiError {
   return (
-    typeof err === "object" &&
-    err !== null &&
-    "status" in err &&
-    "code" in err &&
-    "message" in err
+    typeof err === "object" && err !== null && "status" in err && "code" in err && "message" in err
   );
 }
