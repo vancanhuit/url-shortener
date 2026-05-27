@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { listLinks, getVersion, type Link } from "./lib/api";
+  import { onMount, onDestroy } from "svelte";
+  import { getVersion, type Link } from "./lib/api";
+  import { linksStore } from "./lib/links.svelte";
   import LinkForm from "./lib/LinkForm.svelte";
   import LinkResult from "./lib/LinkResult.svelte";
   import LinkError from "./lib/LinkError.svelte";
@@ -9,30 +10,14 @@
   import IconLink from "./lib/icons/IconLink.svelte";
   import Footer from "./lib/Footer.svelte";
 
-  let items: Link[] = $state([]);
-  let nextCursor: number | null = $state(null);
   let version: string | null = $state(null);
 
   let result: { link: Link; created: boolean } | null = $state(null);
   let error: { message: string } | null = $state(null);
 
-  // Pull the first page of recent links on mount. Errors here are
-  // logged + surfaced as an empty list rather than a hard error so a
-  // flaking database doesn't hide the create form.
-  async function refreshFirstPage(): Promise<void> {
-    try {
-      const page = await listLinks({});
-      items = page.items ?? [];
-      nextCursor = page.next_cursor ?? null;
-    } catch (e) {
-      console.warn("recent list fetch failed", e);
-      items = [];
-      nextCursor = null;
-    }
-  }
-
   onMount(async () => {
-    await refreshFirstPage();
+    await linksStore.loadFirstPage();
+    linksStore.startPolling();
     try {
       const info = await getVersion();
       version = info.version;
@@ -41,33 +26,19 @@
     }
   });
 
+  onDestroy(() => {
+    linksStore.stopPolling();
+  });
+
   async function onCreated(payload: { link: Link; created: boolean }): Promise<void> {
     result = payload;
     error = null;
-    await refreshFirstPage();
+    await linksStore.loadFirstPage();
   }
 
   function onError(err: { message: string }): void {
     error = err;
     result = null;
-  }
-
-  async function onDeleted(code: string): Promise<void> {
-    items = items.filter((it) => it.code !== code);
-    if (result?.link.code === code) {
-      result = null;
-    }
-  }
-
-  async function onLoadMore(): Promise<void> {
-    if (nextCursor === null) return;
-    try {
-      const page = await listLinks({ before: nextCursor });
-      items = [...items, ...(page.items ?? [])];
-      nextCursor = page.next_cursor ?? null;
-    } catch (e) {
-      console.warn("recent list pagination failed", e);
-    }
   }
 </script>
 
@@ -103,7 +74,7 @@
       <h2 class="text-base sm:text-lg font-semibold text-slate-800 dark:text-slate-200 mb-3">
         Recent
       </h2>
-      <RecentList {items} {nextCursor} {onLoadMore} {onDeleted} />
+      <RecentList />
     </section>
   </main>
 </div>

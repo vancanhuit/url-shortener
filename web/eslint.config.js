@@ -27,6 +27,13 @@ export default ts.config(
     },
   },
   {
+    // Svelte reactive modules (.svelte.ts) — parse with the TS parser.
+    files: ["**/*.svelte.ts"],
+    languageOptions: {
+      parser: ts.parser,
+    },
+  },
+  {
     // Config files and Node scripts run in Node, not the browser.
     files: ["*.config.{js,ts}", "scripts/**/*.{js,mjs}"],
     languageOptions: {
