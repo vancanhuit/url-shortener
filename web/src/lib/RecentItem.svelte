@@ -2,12 +2,12 @@
   import { deleteLink, type Link } from "./api";
   import { humanExpiry, plural } from "./time";
   import IconTrash from "./icons/IconTrash.svelte";
+  import { linksStore } from "./links.svelte";
 
   interface Props {
     link: Link;
-    onDeleted: (code: string) => void | Promise<void>;
   }
-  const { link, onDeleted }: Props = $props();
+  const { link }: Props = $props();
 
   // svelte-ignore state_referenced_locally
   let current: Link = $state({ ...link });
@@ -20,7 +20,7 @@
     confirmPending = false;
     try {
       await deleteLink(current.code);
-      await onDeleted(current.code);
+      linksStore.removeItem(current.code);
     } catch (err) {
       console.warn("delete failed", err);
       deleting = false;
