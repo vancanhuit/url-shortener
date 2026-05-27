@@ -122,6 +122,12 @@ web-fmt-check: web-install
 web-lint: web-install
     npm run lint:js
 
+# Run the web SPA unit tests.
+[group("test")]
+[working-directory("web")]
+web-test: web-install
+    npm run test
+
 # Run the binary locally.
 [group("dev")]
 run *ARGS:
