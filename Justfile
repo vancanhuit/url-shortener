@@ -104,6 +104,18 @@ web-dev: web-install
 web-check: web-install
     npm run check
 
+# Format the web SPA with Prettier (writes files in-place).
+[group("dev")]
+[working-directory("web")]
+web-fmt: web-install
+    npm run fmt
+
+# Check web SPA formatting with Prettier (fails on diff; used by CI).
+[group("lint")]
+[working-directory("web")]
+web-fmt-check: web-install
+    npm run fmt:check
+
 # Run the binary locally.
 [group("dev")]
 run *ARGS:

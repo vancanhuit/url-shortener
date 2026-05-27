@@ -80,8 +80,7 @@
     class="font-mono text-sm text-indigo-600 hover:underline shrink-0 dark:text-indigo-400"
     >{current.short_url}</a
   >
-  <span
-    class="truncate text-xs sm:text-sm text-slate-500 flex-1 min-w-0 dark:text-slate-400"
+  <span class="truncate text-xs sm:text-sm text-slate-500 flex-1 min-w-0 dark:text-slate-400"
     >{current.target_url}</span
   >
   <span class="shrink-0 inline-flex flex-wrap items-center gap-1.5 text-xs">
