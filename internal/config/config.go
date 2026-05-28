@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/viper"
+	"github.com/caarlos0/env/v11"
 )
 
 // EnvPrefix is the prefix applied to every environment variable.
@@ -29,27 +29,27 @@ const (
 type Config struct {
 	// Env is the deployment environment ("dev" or "prod"). Influences sane
 	// defaults like log format.
-	Env string `mapstructure:"env"        json:"env"`
+	Env string `env:"URL_SHORTENER_ENV" envDefault:"prod" json:"env"`
 
 	// Addr is the TCP address the HTTP server listens on, e.g. ":8080".
-	Addr string `mapstructure:"addr"       json:"addr"`
+	Addr string `env:"URL_SHORTENER_ADDR" envDefault:":8080" json:"addr"`
 
 	// BaseURL is the public origin used to build short-link URLs.
-	BaseURL string `mapstructure:"base_url"   json:"base_url"`
+	BaseURL string `env:"URL_SHORTENER_BASE_URL" envDefault:"http://localhost:8080" json:"base_url"`
 
 	// LogLevel is one of "debug", "info", "warn", "error".
-	LogLevel string `mapstructure:"log_level"  json:"log_level"`
+	LogLevel string `env:"URL_SHORTENER_LOG_LEVEL" envDefault:"info" json:"log_level"`
 
 	// LogFormat is "text" (human-readable) or "json" (production).
-	LogFormat string `mapstructure:"log_format" json:"log_format"`
+	LogFormat string `env:"URL_SHORTENER_LOG_FORMAT" json:"log_format"`
 
 	// DatabaseURL is a Postgres connection string. Sensitive: redacted by
 	// Redacted() and by the JSON marshaller.
-	DatabaseURL string `mapstructure:"database_url" json:"database_url"`
+	DatabaseURL string `env:"URL_SHORTENER_DATABASE_URL" json:"database_url"`
 
 	// RedisURL is a Redis connection string. Sensitive: redacted by
 	// Redacted() and by the JSON marshaller.
-	RedisURL string `mapstructure:"redis_url"    json:"redis_url"`
+	RedisURL string `env:"URL_SHORTENER_REDIS_URL" json:"redis_url"`
 
 	// AutoMigrate, when true (the default), makes `run` apply any pending
 	// migrations before starting the HTTP server. The migration path uses a
@@ -58,22 +58,22 @@ type Config struct {
 	// pending migrations; the others wait, then see no pending work and
 	// continue. Set to false when you prefer to run `migrate up` as an
 	// explicit, separately-audited step outside the application process.
-	AutoMigrate bool `mapstructure:"auto_migrate" json:"auto_migrate"`
+	AutoMigrate bool `env:"URL_SHORTENER_AUTO_MIGRATE" envDefault:"true" json:"auto_migrate"`
 
 	// CodeLength is the length of auto-generated short codes. Validated by
 	// the shortener package: must be in [shortener.MinLength, MaxLength].
-	CodeLength int `mapstructure:"code_length" json:"code_length"`
+	CodeLength int `env:"URL_SHORTENER_CODE_LENGTH" envDefault:"7" json:"code_length"`
 
 	// Postgres connection-pool tunables. All zero by default, in which
 	// case pgx's own defaults apply. See store.PoolConfig for the
 	// per-knob semantics. Production deployments typically want at
 	// least DBMaxConns set above pgx's default of max(4, NumCPU) to
 	// absorb burst load without queueing requests on the pool.
-	DBMaxConns          int32         `mapstructure:"db_max_conns"           json:"db_max_conns"`
-	DBMinConns          int32         `mapstructure:"db_min_conns"           json:"db_min_conns"`
-	DBMaxConnLifetime   time.Duration `mapstructure:"db_max_conn_lifetime"   json:"db_max_conn_lifetime"`
-	DBMaxConnIdleTime   time.Duration `mapstructure:"db_max_conn_idle_time"  json:"db_max_conn_idle_time"`
-	DBHealthCheckPeriod time.Duration `mapstructure:"db_health_check_period" json:"db_health_check_period"`
+	DBMaxConns          int32         `env:"URL_SHORTENER_DB_MAX_CONNS"           json:"db_max_conns"`
+	DBMinConns          int32         `env:"URL_SHORTENER_DB_MIN_CONNS"           json:"db_min_conns"`
+	DBMaxConnLifetime   time.Duration `env:"URL_SHORTENER_DB_MAX_CONN_LIFETIME"   json:"db_max_conn_lifetime"`
+	DBMaxConnIdleTime   time.Duration `env:"URL_SHORTENER_DB_MAX_CONN_IDLE_TIME"  json:"db_max_conn_idle_time"`
+	DBHealthCheckPeriod time.Duration `env:"URL_SHORTENER_DB_HEALTH_CHECK_PERIOD" json:"db_health_check_period"`
 
 	// TLSCertFile and TLSKeyFile, when both non-empty, switch the HTTP
 	// server to HTTPS on Addr using the PEM-encoded certificate and
@@ -81,17 +81,17 @@ type Config struct {
 	// Validate rejects half-configured pairs. Empty (the default) keeps
 	// the server on plain HTTP, which is the right choice when fronted
 	// by a TLS-terminating reverse proxy (Caddy/nginx/Traefik).
-	TLSCertFile string `mapstructure:"tls_cert_file" json:"tls_cert_file"`
-	TLSKeyFile  string `mapstructure:"tls_key_file"  json:"tls_key_file"`
+	TLSCertFile string `env:"URL_SHORTENER_TLS_CERT_FILE" json:"tls_cert_file"`
+	TLSKeyFile  string `env:"URL_SHORTENER_TLS_KEY_FILE"  json:"tls_key_file"`
 
-	// RateLimitRPS, when > 0, enables Echo's in-memory rate limiter on
+	// RateLimitRPS, when > 0, enables the in-memory rate limiter on
 	// `POST /api/v1/links`. The value is the steady-state requests-per-
 	// second budget per real client IP (extracted via TrustedProxies
 	// when set). 0 -- the default -- disables rate limiting entirely;
 	// production deployments are expected to set this explicitly
 	// (typical starting point: a handful of req/s for unauthenticated
 	// link creation behind a reverse proxy with its own quotas).
-	RateLimitRPS float64 `mapstructure:"rate_limit_rps"   json:"rate_limit_rps"`
+	RateLimitRPS float64 `env:"URL_SHORTENER_RATE_LIMIT_RPS"   json:"rate_limit_rps"`
 
 	// RateLimitBurst is the bucket capacity for the rate limiter --
 	// the number of requests a single IP can issue at once before the
@@ -99,7 +99,7 @@ type Config struct {
 	// RateLimitRPS" (currently 2x the steady-state rate, floored at 1)
 	// so the simple "set just RPS" deployment still works. Ignored
 	// when RateLimitRPS is 0.
-	RateLimitBurst int `mapstructure:"rate_limit_burst" json:"rate_limit_burst"`
+	RateLimitBurst int `env:"URL_SHORTENER_RATE_LIMIT_BURST" json:"rate_limit_burst"`
 
 	// CORSAllowedOrigins is a comma-separated list of allowed Origin
 	// header values for cross-origin requests. Each entry is matched
@@ -109,63 +109,32 @@ type Config struct {
 	// the spec); anything else must parse as an absolute URL.
 	// Empty (the default) leaves CORS off entirely, which is correct
 	// when the SPA and API share an origin.
-	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins" json:"cors_allowed_origins"`
+	CORSAllowedOrigins []string `env:"URL_SHORTENER_CORS_ALLOWED_ORIGINS" envSeparator:"," json:"cors_allowed_origins"`
 
 	// TrustedProxies is a comma-separated list of CIDR blocks (parsed by
 	// net.ParseCIDR) whose request peers are trusted to forward client
 	// IP addresses via X-Forwarded-For. When a request's RemoteAddr
 	// falls inside one of these ranges, the server walks XFF to find
 	// the original client IP; otherwise XFF is ignored and RemoteAddr
-	// stands. Empty (the default) leaves Echo's IPExtractor unset --
-	// equivalent to "no proxy in front". Set this to e.g.
-	// `127.0.0.1/32,10.0.0.0/8` when running behind a reverse proxy.
-	TrustedProxies []string `mapstructure:"trusted_proxies" json:"trusted_proxies"`
+	// stands. Empty (the default) means no proxy in front. Set this to
+	// e.g. `127.0.0.1/32,10.0.0.0/8` when running behind a reverse proxy.
+	TrustedProxies []string `env:"URL_SHORTENER_TRUSTED_PROXIES" envSeparator:"," json:"trusted_proxies"`
 
 	// CacheTTL is how long a positive redirect lookup is cached in
 	// Redis. 0 uses the handler default (1 hour).
-	CacheTTL time.Duration `mapstructure:"cache_ttl" json:"cache_ttl"`
+	CacheTTL time.Duration `env:"URL_SHORTENER_CACHE_TTL" json:"cache_ttl"`
 
 	// NegativeCacheTTL is how long a "not found / gone" answer for
 	// /r/:code is held in Redis. 0 uses the handler default (30s).
-	NegativeCacheTTL time.Duration `mapstructure:"negative_cache_ttl" json:"negative_cache_ttl"`
+	NegativeCacheTTL time.Duration `env:"URL_SHORTENER_NEGATIVE_CACHE_TTL" json:"negative_cache_ttl"`
 }
 
 // Load reads the configuration from environment variables and applies the
 // defaults. It returns an error if the resulting config fails validation.
 func Load() (Config, error) {
-	v := viper.New()
-
-	v.SetEnvPrefix(EnvPrefix)
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
-
-	// Bind every key so AutomaticEnv resolves it on Unmarshal even when the
-	// key has no default (notably log_format, whose default depends on env).
-	for _, key := range []string{
-		"env", "addr", "base_url", "log_level", "log_format",
-		"database_url", "redis_url", "auto_migrate", "code_length",
-		"db_max_conns", "db_min_conns",
-		"db_max_conn_lifetime", "db_max_conn_idle_time",
-		"db_health_check_period",
-		"tls_cert_file", "tls_key_file", "trusted_proxies",
-		"rate_limit_rps", "rate_limit_burst",
-		"cors_allowed_origins",
-		"cache_ttl", "negative_cache_ttl",
-	} {
-		_ = v.BindEnv(key)
-	}
-
-	v.SetDefault("env", EnvProd)
-	v.SetDefault("addr", ":8080")
-	v.SetDefault("base_url", "http://localhost:8080")
-	v.SetDefault("log_level", "info")
-	v.SetDefault("auto_migrate", true)
-	v.SetDefault("code_length", 7)
-	// log_format default is decided after env is known (text in dev, json in prod).
-
-	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		return Config{}, fmt.Errorf("config: unmarshal: %w", err)
+	cfg, err := env.ParseAs[Config]()
+	if err != nil {
+		return Config{}, fmt.Errorf("config: parse env: %w", err)
 	}
 
 	if cfg.LogFormat == "" {
