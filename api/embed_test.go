@@ -1,4 +1,4 @@
-package openapi_test
+package api_test
 
 import (
 	"encoding/json"
@@ -22,8 +22,8 @@ func TestSpec_NotEmpty(t *testing.T) {
 	// accident. The check is anchored on a leading newline rather
 	// than the first N bytes because the spec leads with a comment
 	// block.
-	if !strings.Contains(string(openapi.Spec), "\nopenapi: 3.1") {
-		t.Errorf("Spec does not contain an `openapi: 3.1` pragma at column 0")
+	if !strings.Contains(string(openapi.Spec), "\nopenapi: 3.0") {
+		t.Errorf("Spec does not contain an `openapi: 3.0` pragma at column 0")
 	}
 }
 
@@ -41,8 +41,8 @@ func TestSpecJSON_IsValidJSONAndPreservesStructure(t *testing.T) {
 	if err := json.Unmarshal(openapi.SpecJSON, &doc); err != nil {
 		t.Fatalf("SpecJSON is not valid JSON: %v", err)
 	}
-	if v, _ := doc["openapi"].(string); v != "3.1.0" {
-		t.Errorf("openapi version = %q, want 3.1.0", v)
+	if v, _ := doc["openapi"].(string); v != "3.0.3" {
+		t.Errorf("openapi version = %q, want 3.0.3", v)
 	}
 	paths, _ := doc["paths"].(map[string]any)
 	if paths == nil {

@@ -337,8 +337,8 @@ func TestServer_ServesEmbeddedOpenAPISpec(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if doc["openapi"] != "3.1.0" {
-		t.Errorf("openapi = %v, want 3.1.0", doc["openapi"])
+	if doc["openapi"] != "3.0.3" {
+		t.Errorf("openapi = %v, want 3.0.3", doc["openapi"])
 	}
 	// Cross-check: the served spec must declare the DELETE op
 	// landed in the previous PR. If it doesn't, the spec drifted

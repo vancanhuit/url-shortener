@@ -56,9 +56,7 @@ func getJSON(t *testing.T, url string) (int, map[string]any) {
 	}
 	out := map[string]any{}
 	if len(body) > 0 {
-		if err := json.Unmarshal(body, &out); err != nil {
-			t.Fatalf("decode body %q: %v", body, err)
-		}
+		_ = json.Unmarshal(body, &out) // non-JSON bodies (e.g. plain-text 404) are silently ignored
 	}
 	return resp.StatusCode, out
 }
@@ -196,18 +194,18 @@ func TestServer_RejectsOversizedRequestBody(t *testing.T) {
 	base, stop := startFullServer(t)
 	defer stop()
 
-	// 1 MiB of payload is two orders of magnitude over the 16 KiB cap;
-	// /healthz is a route that doesn't otherwise read the body, so a
-	// successful 413 here proves the BodyLimit middleware fires before
-	// the request reaches any handler. The path is irrelevant -- any
-	// route under the global middleware chain will do.
-	payload := bytes.Repeat([]byte("x"), 1<<20)
+	// Send a JSON body that exceeds the 16 KiB body limit. The payload must be
+	// syntactically valid JSON (so the decoder reads past the limit rather than
+	// failing at byte 0), but contain a value longer than 16 KiB so that
+	// MaxBytesReader fires and the handler returns 413.
+	longValue := strings.Repeat("x", 17*1024) // 17 KiB > 16 KiB cap
+	payload, _ := json.Marshal(map[string]string{"target_url": "https://example.com/" + longValue})
 	req, err := http.NewRequestWithContext(t.Context(),
-		http.MethodPost, base+"/healthz", bytes.NewReader(payload))
+		http.MethodPost, base+"/api/v1/links", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

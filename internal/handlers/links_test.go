@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/labstack/echo/v5"
+
+	openapi "github.com/vancanhuit/url-shortener/api"
 
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 	"github.com/vancanhuit/url-shortener/internal/store"
@@ -254,7 +256,7 @@ func (s *scriptedGen) Generate() (string, error) {
 
 const baseURL = "https://short.test"
 
-func newHandlerWithCache(t *testing.T, st handlers.LinkStore, cc handlers.LinkCache, gen handlers.Generator) (*echo.Echo, *handlers.Links) {
+func newHandlerWithCache(t *testing.T, st handlers.LinkStore, cc handlers.LinkCache, gen handlers.Generator) (chi.Router, *handlers.Links) {
 	t.Helper()
 	return newHandlerWithTTLs(t, st, cc, gen, 0, 0)
 }
@@ -265,7 +267,7 @@ func newHandlerWithTTLs(
 	cc handlers.LinkCache,
 	gen handlers.Generator,
 	cacheTTL, negCacheTTL time.Duration,
-) (*echo.Echo, *handlers.Links) {
+) (chi.Router, *handlers.Links) {
 	t.Helper()
 	h := handlers.NewLinks(handlers.LinksConfig{
 		Store:            st,
@@ -275,16 +277,16 @@ func newHandlerWithTTLs(
 		CacheTTL:         cacheTTL,
 		NegativeCacheTTL: negCacheTTL,
 	})
-	e := echo.New()
-	h.Mount(e)
-	return e, h
+	r := chi.NewRouter()
+	h.Mount(r)
+	return r, h
 }
 
-func doJSON(t *testing.T, e *echo.Echo, method, path, body string) (*httptest.ResponseRecorder, []byte) {
+func doJSON(t *testing.T, e chi.Router, method, path, body string) (*httptest.ResponseRecorder, []byte) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {
-		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -295,18 +297,18 @@ func doJSON(t *testing.T, e *echo.Echo, method, path, body string) (*httptest.Re
 	return rec, out
 }
 
-func decodeLink(t *testing.T, body []byte) handlers.LinkResponse {
+func decodeLink(t *testing.T, body []byte) openapi.LinkResponse {
 	t.Helper()
-	var resp handlers.LinkResponse
+	var resp openapi.LinkResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("unmarshal LinkResponse: %v (body=%s)", err, string(body))
 	}
 	return resp
 }
 
-func decodeError(t *testing.T, body []byte) handlers.ErrorResponse {
+func decodeError(t *testing.T, body []byte) openapi.ErrorResponse {
 	t.Helper()
-	var resp handlers.ErrorResponse
+	var resp openapi.ErrorResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("unmarshal ErrorResponse: %v (body=%s)", err, string(body))
 	}
@@ -379,8 +381,8 @@ func TestCreate_DuplicateUserSuppliedCodeReturns409(t *testing.T) {
 	if got.Error == "" {
 		t.Errorf("expected non-empty error message")
 	}
-	if got.Code != handlers.ErrCodeCodeTaken {
-		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeCodeTaken)
+	if got.Code != openapi.ErrorResponseCodeCodeTaken {
+		t.Errorf("error code = %q, want %q", got.Code, openapi.ErrorResponseCodeCodeTaken)
 	}
 }
 
@@ -513,15 +515,15 @@ func TestCreate_BadInputReturns4xx(t *testing.T) {
 	tests := []struct {
 		name, body string
 		wantStatus int
-		wantCode   string
+		wantCode   openapi.ErrorResponseCode
 	}{
-		{"invalid_json", `{not json`, http.StatusBadRequest, handlers.ErrCodeInvalidJSONBody},
-		{"missing_target_url", `{}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
-		{"empty_target_url", `{"target_url":""}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
-		{"non_http_scheme", `{"target_url":"ftp://x.example"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
-		{"no_host", `{"target_url":"http://"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
-		{"too_long", `{"target_url":"https://x.example/` + strings.Repeat("a", 2100) + `"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
-		{"bad_user_code", `{"target_url":"https://x.example","code":"!!!"}`, http.StatusUnprocessableEntity, handlers.ErrCodeValidation},
+		{"invalid_json", `{not json`, http.StatusBadRequest, openapi.ErrorResponseCodeInvalidJSONBody},
+		{"missing_target_url", `{}`, http.StatusUnprocessableEntity, openapi.ErrorResponseCodeValidationFailed},
+		{"empty_target_url", `{"target_url":""}`, http.StatusUnprocessableEntity, openapi.ErrorResponseCodeValidationFailed},
+		{"non_http_scheme", `{"target_url":"ftp://x.example"}`, http.StatusUnprocessableEntity, openapi.ErrorResponseCodeValidationFailed},
+		{"no_host", `{"target_url":"http://"}`, http.StatusUnprocessableEntity, openapi.ErrorResponseCodeValidationFailed},
+		{"too_long", `{"target_url":"https://x.example/` + strings.Repeat("a", 2100) + `"}`, http.StatusUnprocessableEntity, openapi.ErrorResponseCodeValidationFailed},
+		{"bad_user_code", `{"target_url":"https://x.example","code":"!!!"}`, http.StatusUnprocessableEntity, openapi.ErrorResponseCodeValidationFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -570,8 +572,8 @@ func TestGet_UnknownCodeReturns404(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
-	if got := decodeError(t, body); got.Code != handlers.ErrCodeNotFound {
-		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeNotFound)
+	if got := decodeError(t, body); got.Code != openapi.ErrorResponseCodeNotFound {
+		t.Errorf("error code = %q, want %q", got.Code, openapi.ErrorResponseCodeNotFound)
 	}
 }
 
@@ -861,7 +863,7 @@ func TestRedirect_ExpiredLinkReturns410(t *testing.T) {
 // TestRedirect_ErrorsUseErrorResponseSchema verifies that 4xx/5xx
 // responses from the redirect handler use the same
 // {"error":"...","code":"..."} JSON shape as every other handler,
-// rather than Echo's default {"message":"..."} envelope.
+// rather than a generic error envelope.
 func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 	t.Parallel()
 
@@ -874,13 +876,13 @@ func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 		seed      func(*fakeStore)
 		seedCache func(*fakeCache)
 		wantCode  int
-		wantECode string
+		wantECode openapi.ErrorResponseCode
 	}{
 		{
 			name:      "unknown code returns not_found",
 			path:      "/r/missing1",
 			wantCode:  http.StatusNotFound,
-			wantECode: handlers.ErrCodeNotFound,
+			wantECode: openapi.ErrorResponseCodeNotFound,
 		},
 		{
 			name: "deleted link returns link_deleted",
@@ -890,7 +892,7 @@ func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 				_ = st.SoftDeleteLink(context.Background(), nil, "deldlink")
 			},
 			wantCode:  http.StatusGone,
-			wantECode: handlers.ErrCodeLinkDeleted,
+			wantECode: openapi.ErrorResponseCodeLinkDeleted,
 		},
 		{
 			name: "expired link returns link_expired",
@@ -899,7 +901,7 @@ func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 				_, _ = st.CreateLink(context.Background(), nil, "exprlnk", "https://exp.example", &past)
 			},
 			wantCode:  http.StatusGone,
-			wantECode: handlers.ErrCodeLinkExpired,
+			wantECode: openapi.ErrorResponseCodeLinkExpired,
 		},
 		{
 			name: "negative cache hit returns not_found",
@@ -913,7 +915,7 @@ func TestRedirect_ErrorsUseErrorResponseSchema(t *testing.T) {
 				_ = cc.Set(context.Background(), "link:ncached", "", time.Minute)
 			},
 			wantCode:  http.StatusNotFound,
-			wantECode: handlers.ErrCodeNotFound,
+			wantECode: openapi.ErrorResponseCodeNotFound,
 		},
 	}
 
@@ -963,8 +965,8 @@ func TestGet_ExpiredLinkReturns410(t *testing.T) {
 	if rec.Code != http.StatusGone {
 		t.Errorf("status = %d, want 410", rec.Code)
 	}
-	if got := decodeError(t, body); got.Code != handlers.ErrCodeLinkExpired {
-		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeLinkExpired)
+	if got := decodeError(t, body); got.Code != openapi.ErrorResponseCodeLinkExpired {
+		t.Errorf("error code = %q, want %q", got.Code, openapi.ErrorResponseCodeLinkExpired)
 	}
 }
 
@@ -1178,8 +1180,8 @@ func TestDelete_UnknownCodeReturns404(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
 	}
-	if got := decodeError(t, body); got.Code != handlers.ErrCodeNotFound {
-		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeNotFound)
+	if got := decodeError(t, body); got.Code != openapi.ErrorResponseCodeNotFound {
+		t.Errorf("error code = %q, want %q", got.Code, openapi.ErrorResponseCodeNotFound)
 	}
 }
 
@@ -1241,8 +1243,8 @@ func TestGet_DeletedLinkReturns410(t *testing.T) {
 	if rec.Code != http.StatusGone {
 		t.Errorf("status = %d, want 410", rec.Code)
 	}
-	if got := decodeError(t, body); got.Code != handlers.ErrCodeLinkDeleted {
-		t.Errorf("error code = %q, want %q", got.Code, handlers.ErrCodeLinkDeleted)
+	if got := decodeError(t, body); got.Code != openapi.ErrorResponseCodeLinkDeleted {
+		t.Errorf("error code = %q, want %q", got.Code, openapi.ErrorResponseCodeLinkDeleted)
 	}
 }
 
@@ -1271,9 +1273,9 @@ func TestRedirect_DeletedLinkReturns410(t *testing.T) {
 // --- List -------------------------------------------------------------------
 
 // decodeList decodes a /api/v1/links list body into the public shape.
-func decodeList(t *testing.T, body []byte) handlers.ListResponse {
+func decodeList(t *testing.T, body []byte) openapi.ListResponse {
 	t.Helper()
-	var resp handlers.ListResponse
+	var resp openapi.ListResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("decode list: %v\nbody = %s", err, string(body))
 	}
@@ -1402,7 +1404,8 @@ func TestList_BadLimitFallsBackToDefault(t *testing.T) {
 	}
 	e, _ := newHandlerWithCache(t, st, cc, &scriptedGen{})
 
-	for _, raw := range []string{"abc", "-5", "0"} {
+	// Non-positive integers pass binding but are clamped to the default.
+	for _, raw := range []string{"-5", "0"} {
 		rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links?limit="+raw, "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("limit=%q status = %d, body = %s", raw, rec.Code, string(body))
@@ -1411,6 +1414,12 @@ func TestList_BadLimitFallsBackToDefault(t *testing.T) {
 		if len(resp.Items) != 10 {
 			t.Errorf("limit=%q items = %d, want default 10", raw, len(resp.Items))
 		}
+	}
+
+	// Non-integer string fails binding (oapi-codegen validates before handler).
+	rec, body := doJSON(t, e, http.MethodGet, "/api/v1/links?limit=abc", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("limit=\"abc\" status = %d, want 400, body = %s", rec.Code, string(body))
 	}
 }
 
@@ -1424,8 +1433,8 @@ func TestList_StoreFailureReturns500(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", rec.Code, string(body))
 	}
-	if got := decodeError(t, body).Code; got != handlers.ErrCodeInternal {
-		t.Errorf("error code = %q, want %q", got, handlers.ErrCodeInternal)
+	if got := decodeError(t, body).Code; got != openapi.ErrorResponseCodeInternalError {
+		t.Errorf("error code = %q, want %q", got, openapi.ErrorResponseCodeInternalError)
 	}
 }
 

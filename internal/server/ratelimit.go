@@ -2,14 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v5"
-
+	"github.com/vancanhuit/url-shortener/api"
 	"github.com/vancanhuit/url-shortener/internal/config"
-	"github.com/vancanhuit/url-shortener/internal/handlers"
 )
 
 // rateLimiter is the shared-state backend for the per-IP rate limiter.
@@ -28,20 +27,18 @@ const rateLimitKeyPrefix = "ratelimit:create:"
 // returned slice is empty -- rate limiting is fully opt-in.
 //
 // The limiter uses a Redis fixed-window counter (via rl) keyed on the
-// real client IP (Context.RealIP, which honors cfg.TrustedProxies).
-// Because the counter lives in Redis it is shared across all replicas,
-// so the configured RPS budget is enforced globally -- not multiplied
-// by the replica count. On a deny it returns 429 with the project's
-// standard JSON error envelope.
+// real client IP (resolved via ipExtractor). Because the counter lives
+// in Redis it is shared across all replicas, so the configured RPS
+// budget is enforced globally -- not multiplied by the replica count.
 //
 // Fail-open: a Redis error is logged and the request is allowed through
 // to avoid turning a cache outage into a service outage.
-//
-// Fixed-window trade-off: at a window boundary a client can observe up
-// to 2 × burst requests. Acceptable for abuse prevention; switch to a
-// sliding-window (sorted-set) implementation if strict per-second
-// budgets are required.
-func buildCreateRateLimiter(cfg config.Config, rl rateLimiter, logger *slog.Logger) []echo.MiddlewareFunc {
+func buildCreateRateLimiter(
+	cfg config.Config,
+	rl rateLimiter,
+	ipExtractor func(r *http.Request) string,
+	logger *slog.Logger,
+) []func(http.Handler) http.Handler {
 	if cfg.RateLimitRPS <= 0 {
 		return nil
 	}
@@ -56,39 +53,43 @@ func buildCreateRateLimiter(cfg config.Config, rl rateLimiter, logger *slog.Logg
 	}
 
 	// Fixed window of 1 second: `burst` requests per second per IP.
-	// Using 1 s keeps the key TTL short and keeps the math simple;
-	// the RPS value determines the steady-state budget when burst is
-	// left at its default (2 × RPS) and the operator tunes both.
 	const window = time.Second
 
-	mw := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			ip := c.RealIP()
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var ip string
+			if ipExtractor != nil {
+				ip = ipExtractor(r)
+			} else {
+				ip = r.RemoteAddr
+			}
 			key := rateLimitKeyPrefix + ip
 
-			allowed, _, err := rl.RateLimit(c.Request().Context(), key, burst, window)
+			allowed, _, err := rl.RateLimit(r.Context(), key, burst, window)
 			if err != nil {
 				// Redis unavailable: fail open so a cache outage
 				// never becomes a request outage.
 				logger.Warn("rate limiter: backend error, allowing request",
 					"error", err, "ip", ip)
-				return next(c)
+				next.ServeHTTP(w, r)
+				return
 			}
 
 			if !allowed {
 				logger.Info("rate limit exceeded",
 					"identifier", ip,
-					"path", c.Path(),
-					"method", c.Request().Method,
+					"method", r.Method,
 				)
-				return c.JSON(http.StatusTooManyRequests,
-					handlers.ErrorResponse{
-						Error: "rate limit exceeded",
-						Code:  handlers.ErrCodeRateLimited,
-					})
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(api.ErrorResponse{
+					Error: "rate limit exceeded",
+					Code:  api.ErrorResponseCodeRateLimited,
+				})
+				return
 			}
-			return next(c)
-		}
+			next.ServeHTTP(w, r)
+		})
 	}
 
 	logger.Info("rate limiter enabled",
@@ -97,5 +98,5 @@ func buildCreateRateLimiter(cfg config.Config, rl rateLimiter, logger *slog.Logg
 		"rps", cfg.RateLimitRPS,
 		"burst", burst,
 	)
-	return []echo.MiddlewareFunc{mw}
+	return []func(http.Handler) http.Handler{mw}
 }

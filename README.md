@@ -8,9 +8,11 @@ A small URL shortener service written in Go.
 ## Tech stack
 
 - Go 1.26 with the standard library's `log/slog`, `net/http`, etc.
-- [Echo v5](https://echo.labstack.com/) for HTTP routing and middleware.
-- [Cobra](https://cobra.dev/) + [Viper](https://github.com/spf13/viper) for CLI
-  and 12-factor configuration.
+- [Chi v5](https://github.com/go-chi/chi) for HTTP routing and middleware, with
+  [oapi-codegen](https://github.com/oapi-codegen/oapi-codegen) generating a
+  type-safe strict server from the OpenAPI spec.
+- [urfave/cli v3](https://cli.urfave.org/) for the CLI and
+  [caarlos0/env](https://github.com/caarlos0/env) for 12-factor configuration.
 - PostgreSQL via [`pgx/v5`](https://github.com/jackc/pgx).
 - Redis via [`go-redis/v9`](https://github.com/redis/go-redis).
 - [Goose](https://github.com/pressly/goose) for database migrations
@@ -184,13 +186,13 @@ behind a reverse proxy are not affected.
 
 ## API
 
-The full HTTP contract is described by an OpenAPI 3.1 document at
+The full HTTP contract is described by an OpenAPI 3.0 document at
 [`api/openapi.yaml`](api/openapi.yaml). The same document is embedded
 into the binary and served at runtime, alongside two interactive
 viewers:
 
-- `GET /api/v1/openapi.json` -- canonical machine-readable form.
-- `GET /api/v1/openapi.yaml` -- the original source for humans / tools
+- `GET /api/v1/openapi.json` -- canonical machine-readable JSON form.
+- `GET /api/v1/openapi.yaml` -- the original YAML source for humans / tools
   that prefer YAML.
 - `GET /api/v1/docs` -- [Swagger UI](https://swagger.io/tools/swagger-ui/)
   with try-it-out enabled. Vendored from `swagger-ui-dist`; works
@@ -240,8 +242,8 @@ the redirect endpoint, bumped fire-and-forget on each successful
 | `GET    /api/v1/links/:code`| Fetch link metadata as JSON.                                                             |
 | `DELETE /api/v1/links/:code`| Soft-delete a link. Returns `204` on success, `404` thereafter; no body. See below.      |
 | `GET    /r/:code`           | 302 redirect to the link's `target_url`. Read-through Redis cache.                       |
-| `GET    /api/v1/openapi.json` | OpenAPI 3.1 document (machine-readable JSON, embedded at build time).                  |
-| `GET    /api/v1/openapi.yaml` | OpenAPI 3.1 document (original YAML source).                                           |
+| `GET    /api/v1/openapi.json` | OpenAPI 3.0 document (machine-readable JSON, embedded at build time).                  |
+| `GET    /api/v1/openapi.yaml` | OpenAPI 3.0 document (original YAML source).                                           |
 | `GET    /api/v1/docs`         | Swagger UI (interactive, try-it-out). Self-contained, vendored.                        |
 | `GET    /api/v1/redoc`        | Redoc (read-only reference doc). Self-contained, vendored.                             |
 
@@ -465,10 +467,10 @@ upcoming phases of the rewrite plan.
 ```
 cmd/url-shortener/        binary entry point                            (present)
 internal/
-  cli/                    cobra commands (run, migrate, version, config, healthcheck) (present)
-  config/                 viper-based env config loader                   (present)
+  cli/                    urfave/cli v3 commands (run, migrate, version, config, healthcheck) (present)
+  config/                 caarlos0/env config loader                      (present)
   buildinfo/              version / commit / date set via -ldflags        (present)
-  server/                 echo setup, middleware, lifecycle              (present)
+  server/                 chi router setup, middleware, lifecycle        (present)
   handlers/               operational, json links api, html web ui       (present)
   shortener/              short-code generation                          (present)
   store/                  pgx-based repository                           (present)

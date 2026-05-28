@@ -9,29 +9,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 )
 
-// newEcho returns an Echo with the operational handlers mounted using the
-// supplied set of named readiness checks.
-func newEcho(checks map[string]func(ctx context.Context) error) *echo.Echo {
-	e := echo.New()
+// newChiRouter returns a Chi router with the operational handlers mounted.
+func newChiRouter(checks map[string]func(ctx context.Context) error) chi.Router {
+	r := chi.NewRouter()
 	op := handlers.NewOperational()
 	for name, fn := range checks {
 		op.AddReadinessCheck(name, fn)
 	}
-	op.Mount(e)
-	return e
+	op.Mount(r)
+	return r
 }
 
 // do issues a GET to path and returns status + decoded JSON body.
-func do(t *testing.T, e *echo.Echo, path string) (int, map[string]any) {
+func do(t *testing.T, h http.Handler, path string) (int, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, req)
 	body := map[string]any{}
 	if rec.Body.Len() > 0 {
 		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
@@ -44,7 +43,7 @@ func do(t *testing.T, e *echo.Echo, path string) (int, map[string]any) {
 func TestHealthz_AlwaysOK(t *testing.T) {
 	t.Parallel()
 
-	e := newEcho(nil)
+	e := newChiRouter(nil)
 	code, body := do(t, e, "/healthz")
 	if code != http.StatusOK {
 		t.Errorf("status = %d, want 200", code)
@@ -57,7 +56,7 @@ func TestHealthz_AlwaysOK(t *testing.T) {
 func TestVersion_ReturnsBuildInfo(t *testing.T) {
 	t.Parallel()
 
-	e := newEcho(nil)
+	e := newChiRouter(nil)
 	code, body := do(t, e, "/version")
 	if code != http.StatusOK {
 		t.Errorf("status = %d, want 200", code)
@@ -72,7 +71,7 @@ func TestVersion_ReturnsBuildInfo(t *testing.T) {
 func TestReadyz_NoChecksIsOK(t *testing.T) {
 	t.Parallel()
 
-	e := newEcho(nil)
+	e := newChiRouter(nil)
 	code, body := do(t, e, "/readyz")
 	if code != http.StatusOK {
 		t.Errorf("status = %d, want 200", code)
@@ -85,7 +84,7 @@ func TestReadyz_NoChecksIsOK(t *testing.T) {
 func TestReadyz_AllChecksPass(t *testing.T) {
 	t.Parallel()
 
-	e := newEcho(map[string]func(ctx context.Context) error{
+	e := newChiRouter(map[string]func(ctx context.Context) error{
 		"db":    func(_ context.Context) error { return nil },
 		"cache": func(_ context.Context) error { return nil },
 	})
@@ -101,7 +100,7 @@ func TestReadyz_AllChecksPass(t *testing.T) {
 func TestReadyz_FailingCheckReturns503(t *testing.T) {
 	t.Parallel()
 
-	e := newEcho(map[string]func(ctx context.Context) error{
+	e := newChiRouter(map[string]func(ctx context.Context) error{
 		"db":    func(_ context.Context) error { return nil },
 		"cache": func(_ context.Context) error { return errors.New("connection refused") },
 	})

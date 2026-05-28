@@ -2,24 +2,23 @@ package server
 
 import (
 	"net"
-
-	"github.com/labstack/echo/v5"
+	"net/http"
+	"strings"
 )
 
-// buildIPExtractor returns an IPExtractor configured to walk
-// X-Forwarded-For only when the request's immediate peer falls inside
-// one of the supplied CIDR ranges. It returns nil when the slice is
-// empty (or contains only empty strings) so the caller can fall back
-// to Echo's default RemoteAddr-based behavior -- callers should not
-// install a nil extractor.
+// buildIPExtractor returns a function that extracts the real client IP
+// from a request. When trustedProxies is non-empty, X-Forwarded-For is
+// honored only when the immediate peer (RemoteAddr) falls inside one
+// of those CIDR ranges; otherwise RemoteAddr is returned directly.
+//
+// A nil return means no trusted proxies were configured; callers
+// should fall back to using r.RemoteAddr (or net.SplitHostPort) directly.
 //
 // CIDR strings are expected to have already been validated by
 // config.Validate; entries that fail to parse here are silently
-// skipped to keep the function total. (Validate runs at startup, so
-// reaching here with an unparseable entry would mean the validator
-// has a bug -- worth the small belt-and-suspenders.)
-func buildIPExtractor(trustedProxies []string) echo.IPExtractor {
-	opts := make([]echo.TrustOption, 0, len(trustedProxies))
+// skipped to keep the function total.
+func buildIPExtractor(trustedProxies []string) func(r *http.Request) string {
+	nets := make([]*net.IPNet, 0, len(trustedProxies))
 	for _, cidr := range trustedProxies {
 		if cidr == "" {
 			continue
@@ -28,10 +27,38 @@ func buildIPExtractor(trustedProxies []string) echo.IPExtractor {
 		if err != nil {
 			continue
 		}
-		opts = append(opts, echo.TrustIPRange(ipnet))
+		nets = append(nets, ipnet)
 	}
-	if len(opts) == 0 {
+	if len(nets) == 0 {
 		return nil
 	}
-	return echo.ExtractIPFromXFFHeader(opts...)
+
+	return func(r *http.Request) string {
+		peerStr, _, _ := net.SplitHostPort(r.RemoteAddr)
+		peer := net.ParseIP(peerStr)
+
+		trusted := false
+		if peer != nil {
+			for _, ipnet := range nets {
+				if ipnet.Contains(peer) {
+					trusted = true
+					break
+				}
+			}
+		}
+
+		if trusted {
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				// Take the leftmost (client-provided) IP.
+				parts := strings.SplitN(xff, ",", 2)
+				if ip := strings.TrimSpace(parts[0]); ip != "" {
+					return ip
+				}
+			}
+		}
+		if peerStr != "" {
+			return peerStr
+		}
+		return r.RemoteAddr
+	}
 }

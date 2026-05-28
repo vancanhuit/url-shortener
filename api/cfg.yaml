@@ -1,0 +1,16 @@
+package: api
+generate:
+  chi-server: true
+  strict-server: true
+  models: true
+  embedded-spec: false
+output: api/gen.go
+output-options:
+  name-normalizer: ToCamelCaseWithInitialisms
+  include-operation-ids:
+    - listLinks
+    - createLink
+    - getLink
+    - deleteLink
+compatibility:
+  apply-chi-middleware-first-to-last: true

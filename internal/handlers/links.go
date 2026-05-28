@@ -3,21 +3,24 @@
 //
 // The implementation is split across several files:
 //   - links.go           interfaces, struct, constructor, route mounting
-//   - links_types.go     request/response shapes, error codes
-//   - links_handlers.go  HTTP handlers (Create, Get, List, Delete, Redirect)
+//   - links_types.go     helper functions, error types
+//   - links_handlers.go  HTTP handlers (StrictServerInterface + Redirect)
 //   - links_service.go   business logic (Persist, ClassifyPersistError, etc.)
 //   - links_cache.go     cache helpers and background click machinery
 package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 
+	"github.com/vancanhuit/url-shortener/api"
 	"github.com/vancanhuit/url-shortener/internal/store"
 )
 
@@ -170,8 +173,8 @@ func NewLinks(cfg LinksConfig) *Links {
 	}
 }
 
-// Mount registers the API + redirect routes on e. The public redirect
-// lives under /r/:code (rather than /:code) so it can never shadow
+// Mount registers the API + redirect routes on r. The public redirect
+// lives under /r/{code} (rather than /{code}) so it can never shadow
 // operational endpoints (/healthz, /readyz, /version) or future
 // top-level routes like /api, static assets, or HTML pages.
 //
@@ -179,10 +182,30 @@ func NewLinks(cfg LinksConfig) *Links {
 // POST /api/v1/links -- the abuse-prone write endpoint. Server.New
 // uses this hook to install the rate limiter when configured; tests
 // usually pass nothing.
-func (h *Links) Mount(e *echo.Echo, createMW ...echo.MiddlewareFunc) {
-	e.POST("/api/v1/links", h.Create, createMW...)
-	e.GET("/api/v1/links", h.List)
-	e.GET("/api/v1/links/:code", h.Get)
-	e.DELETE("/api/v1/links/:code", h.Delete)
-	e.GET("/r/:code", h.Redirect)
+func (h *Links) Mount(r chi.Router, createMW ...func(http.Handler) http.Handler) {
+	opts := api.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, errResp(api.ErrorResponseCodeInternalError, "request body too large"))
+				return
+			}
+			writeJSON(w, http.StatusBadRequest, errResp(api.ErrorResponseCodeInvalidJSONBody, "invalid json body"))
+		},
+		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, _ error) {
+			writeJSON(w, http.StatusInternalServerError, errResp(api.ErrorResponseCodeInternalError, "internal error"))
+		},
+	}
+	strict := api.NewStrictHandlerWithOptions(h, nil, opts)
+	wrapper := api.ServerInterfaceWrapper{
+		Handler: strict,
+		ErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+			writeJSON(w, http.StatusBadRequest, errResp(api.ErrorResponseCodeValidationFailed, err.Error()))
+		},
+	}
+	r.Get("/api/v1/links", wrapper.ListLinks)
+	r.With(createMW...).Post("/api/v1/links", wrapper.CreateLink)
+	r.Delete("/api/v1/links/{code}", wrapper.DeleteLink)
+	r.Get("/api/v1/links/{code}", wrapper.GetLink)
+	r.Get("/r/{code}", h.Redirect)
 }

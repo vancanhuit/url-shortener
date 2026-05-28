@@ -1,15 +1,13 @@
-// Package openapi embeds the OpenAPI 3.1 specification (api/openapi.yaml)
-// into the binary and exposes it both as the original YAML bytes and as
+// Package api embeds the OpenAPI specification (api/openapi.yaml) into
+// the binary and exposes it both as the original YAML bytes and as
 // canonical JSON. The handler layer uses SpecJSON to serve
 // GET /api/v1/openapi.json without re-marshaling on every request.
 //
 // The directory is named `api/` rather than `internal/openapi/` so the
 // spec lives at the path most OpenAPI tooling auto-discovers
 // (`api/openapi.yaml`, the de-facto convention published in the
-// golang-standards/project-layout repo). The package itself is
-// declared `openapi` so import sites read naturally
-// (`openapi.Spec`, `openapi.SpecJSON`).
-package openapi
+// golang-standards/project-layout repo).
+package api
 
 import (
 	_ "embed"

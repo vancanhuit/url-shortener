@@ -6,7 +6,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 
 	openapi "github.com/vancanhuit/url-shortener/api"
 )
@@ -22,28 +22,27 @@ import (
 //     reaching for curl.
 //   - GET /api/v1/redoc        -- Redoc (read-only reference doc, with
 //     a nicer information density for browsing the schemas).
-//
-// The spec bytes are precomputed at package init in `api`; the
-// handlers therefore do no work per request beyond writing the
-// response. The HTML pages reference the assets vendored into
-// `web/static/` (swagger-ui-bundle.js, redoc.standalone.js, etc.),
-// embedded into the binary by the `web` package. All four responses
-// are bytewise stable for a given build, which lets a CDN or HTTP
-// cache front them trivially.
-func MountOpenAPI(e *echo.Echo) {
-	e.GET("/api/v1/openapi.json", func(c *echo.Context) error {
-		return c.Blob(http.StatusOK, echo.MIMEApplicationJSON, openapi.SpecJSON)
+func MountOpenAPI(r chi.Router) {
+	r.Get("/api/v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(openapi.SpecJSON)
 	})
-	e.GET("/api/v1/openapi.yaml", func(c *echo.Context) error {
-		// Echo doesn't define a YAML MIME constant; the IANA
-		// registration is `application/yaml` (RFC 9512).
-		return c.Blob(http.StatusOK, "application/yaml; charset=utf-8", openapi.Spec)
+	r.Get("/api/v1/openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
+		// IANA registration for YAML is `application/yaml` (RFC 9512).
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(openapi.Spec)
 	})
-	e.GET("/api/v1/docs", func(c *echo.Context) error {
-		return c.HTML(http.StatusOK, swaggerUIHTML)
+	r.Get("/api/v1/docs", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(swaggerUIHTML))
 	})
-	e.GET("/api/v1/redoc", func(c *echo.Context) error {
-		return c.HTML(http.StatusOK, redocHTML)
+	r.Get("/api/v1/redoc", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(redocHTML))
 	})
 }
 

@@ -1,9 +1,5 @@
-// Package server wires the Echo HTTP server: routes, middleware, and the
+// Package server wires the Chi HTTP server: routes, middleware, and the
 // graceful-shutdown lifecycle.
-//
-// Echo v5 dropped its built-in Start/Shutdown helpers, so we drive the
-// listener with a plain *http.Server using e.ServeHTTP as the handler. This
-// is the idiomatic Go pattern and gives us full control over timeouts.
 package server
 
 import (
@@ -16,8 +12,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/vancanhuit/url-shortener/internal/cache"
 	"github.com/vancanhuit/url-shortener/internal/config"
@@ -63,7 +59,6 @@ type Server struct {
 	cfg    config.Config
 	logger *slog.Logger
 	deps   Deps
-	echo   *echo.Echo
 	http   *http.Server
 
 	// links is the constructed handler bundle. Held on the server
@@ -85,45 +80,26 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		panic("server: Deps.Generator must not be nil")
 	}
 
-	e := echo.New()
+	// Build the IP extractor once; nil means "use RemoteAddr directly".
+	ipExtractor := buildIPExtractor(cfg.TrustedProxies)
 
-	// IPExtractor is consulted by Context.RealIP() and by the request
-	// logger's LogRemoteIP path. With cfg.TrustedProxies empty (the
-	// default), we leave IPExtractor unset so Echo falls back to its
-	// legacy RemoteAddr-based behavior -- equivalent to "no proxy in
-	// front", which is correct for direct deployments and for the
-	// docker compose stack today. When CIDRs are configured, install
-	// an XFF-aware extractor that only honors the header when the
-	// immediate peer falls inside one of those ranges; spoofed XFF
-	// from untrusted clients is ignored.
-	if extractor := buildIPExtractor(cfg.TrustedProxies); extractor != nil {
-		e.IPExtractor = extractor
-	}
+	r := chi.NewRouter()
 
-	reg := newMetricsRegistry()
-	reqTotal, reqDuration := newRequestMetrics(reg)
-
-	e.Use(middleware.Recover())
-	e.Use(middleware.RequestID())
-	e.Use(slogRequestLogger(logger))
+	r.Use(chimw.Recoverer)
+	r.Use(chimw.RequestID)
+	r.Use(slogRequestLogger(logger, ipExtractor))
 	// Prometheus RED metrics: record every request's rate, error
 	// count, and duration by route template and status code.
-	e.Use(buildMetricsMiddleware(reqTotal, reqDuration))
-	// Cap request bodies before any handler reads them. Echo's
-	// BodyLimit short-circuits with 413 Request Entity Too Large
-	// when Content-Length exceeds the cap, and wraps the body
-	// reader so chunked / unknown-length requests are caught mid-
-	// read too. Applies to every route, including the static
-	// asset handler (where bodies are always empty in practice).
-	e.Use(middleware.BodyLimit(maxRequestBodyBytes))
-	// Security headers: X-Content-Type-Options, X-Frame-Options,
-	// X-XSS-Protection, Referrer-Policy, and (for HTTPS requests)
-	// Strict-Transport-Security. Applied to every response.
-	e.Use(buildSecureHeaders())
-	// CORS is opt-in via config; no-op when CORSAllowedOrigins is
-	// empty (the default for same-origin SPA + API deployments).
+	reg := newMetricsRegistry()
+	reqTotal, reqDuration := newRequestMetrics(reg)
+	r.Use(buildMetricsMiddleware(reqTotal, reqDuration))
+	// Cap request bodies before any handler reads them.
+	r.Use(bodyLimitMiddleware(maxRequestBodyBytes))
+	// Security headers on every response.
+	r.Use(buildSecureHeaders())
+	// CORS is opt-in via config; no-op when CORSAllowedOrigins is empty.
 	if cors := buildCORS(cfg, logger); cors != nil {
-		e.Use(cors)
+		r.Use(cors)
 	}
 
 	op := handlers.NewOperational()
@@ -131,18 +107,15 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		return deps.Store.Pool().Ping(ctx)
 	})
 	op.AddReadinessCheck("redis", deps.Cache.Ping)
-	op.Mount(e)
-	mountMetrics(e, reg)
+	op.Mount(r)
+	mountMetrics(r, reg)
 
-	// API self-description: mount the embedded OpenAPI 3.1 document
-	// at /api/v1/openapi.{json,yaml} ahead of the JSON API itself so
-	// the routes are co-located with the rest of /api/v1/* in the
-	// router's mount log.
-	handlers.MountOpenAPI(e)
+	// API self-description: mount the embedded OpenAPI document.
+	handlers.MountOpenAPI(r)
 
 	// Links API + redirect. The optional rate limiter applies only to
 	// the abuse-prone POST /api/v1/links endpoint and is keyed on the
-	// real client IP (already correct via cfg.TrustedProxies above).
+	// real client IP.
 	links := handlers.NewLinks(handlers.LinksConfig{
 		Store:            deps.Store,
 		Cache:            deps.Cache,
@@ -152,17 +125,12 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		CacheTTL:         cfg.CacheTTL,
 		NegativeCacheTTL: cfg.NegativeCacheTTL,
 	})
-	createMW := buildCreateRateLimiter(cfg, deps.Cache, logger)
-	links.Mount(e, createMW...)
+	createMW := buildCreateRateLimiter(cfg, deps.Cache, ipExtractor, logger)
+	links.Mount(r, createMW...)
 
-	// SPA shell + static assets. The Vite + Svelte build emits
-	// `web/dist/` which is //go:embed'd into the binary; the SPA
-	// then drives the JSON API directly -- no server-side templating
-	// or htmx-style partials remain.
+	// SPA shell + static assets.
 	indexHTML, err := web.IndexHTML()
 	if err != nil {
-		// dist/index.html is part of the //go:embed set, so a read
-		// failure means a programming error: fail fast at startup.
 		panic(fmt.Errorf("server: read web index: %w", err))
 	}
 	spa := handlers.NewSPA(handlers.SPAConfig{
@@ -170,18 +138,18 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		IndexHTML: indexHTML,
 		Logger:    logger,
 	})
-	spa.Mount(e)
+	spa.Mount(r)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           e,
+		Handler:           r,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
 	}
 
-	return &Server{cfg: cfg, logger: logger, deps: deps, echo: e, http: httpSrv, links: links}
+	return &Server{cfg: cfg, logger: logger, deps: deps, http: httpSrv, links: links}
 }
 
 // Run starts the HTTP server and blocks until ctx is canceled (typically by
@@ -310,49 +278,51 @@ func timeUntil(ctx context.Context) time.Duration {
 	return remaining
 }
 
-// slogRequestLogger returns Echo middleware that logs each request via slog.
-func slogRequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
-	return middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		LogStatus:    true,
-		LogURI:       true,
-		LogMethod:    true,
-		LogLatency:   true,
-		LogRequestID: true,
-		LogRemoteIP:  true,
-		LogUserAgent: true,
-		HandleError:  true,
-		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
+// slogRequestLogger returns Chi middleware that logs each request via slog.
+// ipExtractor is used to determine the remote IP; nil falls back to RemoteAddr.
+func slogRequestLogger(logger *slog.Logger, ipExtractor func(r *http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r)
+			dur := time.Since(start)
+
 			level := slog.LevelInfo
 			switch {
-			case v.Error != nil, v.Status >= 500:
+			case rec.status >= 500:
 				level = slog.LevelError
-			case v.Status >= 400:
+			case rec.status >= 400:
 				level = slog.LevelWarn
 			}
 
-			attrs := []any{
-				"method", v.Method,
-				"uri", v.URI,
-				"status", v.Status,
-				"latency_ms", v.Latency.Milliseconds(),
-				"request_id", v.RequestID,
-				"remote_ip", v.RemoteIP,
-				"user_agent", v.UserAgent,
+			remoteIP := r.RemoteAddr
+			if ipExtractor != nil {
+				remoteIP = ipExtractor(r)
 			}
-			if v.Error != nil {
-				attrs = append(attrs, "error", v.Error.Error())
-			}
-			// Forward the request context so handlers like otelslog can
-			// extract the trace/span IDs the http server installed.
-			// Falls back to Background only if the request is somehow
-			// detached (e.g. tests that synthesize a logger value
-			// directly), which keeps the call total-safe.
-			ctx := context.Background()
-			if c != nil && c.Request() != nil {
-				ctx = c.Request().Context()
-			}
-			logger.Log(ctx, level, "http request", attrs...)
-			return nil
-		},
-	})
+
+			requestID := chimw.GetReqID(r.Context())
+			logger.Log(r.Context(), level, "http request",
+				"method", r.Method,
+				"uri", r.RequestURI,
+				"status", rec.status,
+				"latency_ms", dur.Milliseconds(),
+				"request_id", requestID,
+				"remote_ip", remoteIP,
+				"user_agent", r.UserAgent(),
+			)
+		})
+	}
+}
+
+// bodyLimitMiddleware caps request body size at maxBytes. Requests with
+// bodies that exceed the limit will encounter a read error mid-stream
+// (http.MaxBytesReader) causing the handler to return an error.
+func bodyLimitMiddleware(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
