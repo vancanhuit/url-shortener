@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/vancanhuit/url-shortener/internal/cache"
 	"github.com/vancanhuit/url-shortener/internal/config"
@@ -20,15 +22,12 @@ var (
 	migrateVersionsFn = migrate.Versions
 )
 
-func ensureSchemaCurrent(cmd *cobra.Command, cfg config.Config) error {
+func ensureSchemaCurrent(ctx context.Context, cfg config.Config) error {
 	if cfg.AutoMigrate {
-		if err := migrateUpFn(cmd.Context(), cfg.DatabaseURL); err != nil {
-			return err
-		}
-		return nil
+		return migrateUpFn(ctx, cfg.DatabaseURL)
 	}
 
-	current, latest, err := migrateVersionsFn(cmd.Context(), cfg.DatabaseURL)
+	current, latest, err := migrateVersionsFn(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
@@ -42,19 +41,16 @@ func ensureSchemaCurrent(cmd *cobra.Command, cfg config.Config) error {
 	return nil
 }
 
-func newRunCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "run",
-		Short: "Run the HTTP server",
-		Long: "Run the HTTP server. Loads config from environment, opens the " +
-			"Postgres pool, mounts routes, and serves until SIGINT/SIGTERM " +
-			"triggers a graceful shutdown.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+func newRunCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "run",
+		Usage: "Run the HTTP server",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-			logger, err := newLogger(cfg, cmd.ErrOrStderr())
+			logger, err := newLogger(cfg, os.Stderr)
 			if err != nil {
 				return err
 			}
@@ -65,10 +61,10 @@ func newRunCmd() *cobra.Command {
 			if cfg.AutoMigrate {
 				logger.Info("auto_migrate=true; applying migrations before serving")
 			}
-			if err := ensureSchemaCurrent(cmd, cfg); err != nil {
+			if err := ensureSchemaCurrent(ctx, cfg); err != nil {
 				return err
 			}
-			st, err := store.NewWithPool(cmd.Context(), cfg.DatabaseURL, store.PoolConfig{
+			st, err := store.NewWithPool(ctx, cfg.DatabaseURL, store.PoolConfig{
 				MaxConns:          cfg.DBMaxConns,
 				MinConns:          cfg.DBMinConns,
 				MaxConnLifetime:   cfg.DBMaxConnLifetime,
@@ -82,7 +78,7 @@ func newRunCmd() *cobra.Command {
 
 			// Redis is a required dependency (enforced by config.Validate),
 			// so RedisURL is guaranteed to be non-empty here.
-			cc, err := cache.New(cmd.Context(), cfg.RedisURL)
+			cc, err := cache.New(ctx, cfg.RedisURL)
 			if err != nil {
 				return err
 			}
@@ -90,7 +86,7 @@ func newRunCmd() *cobra.Command {
 
 			// Cancel the run context on SIGINT/SIGTERM so the server can
 			// shut down gracefully.
-			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
 			gen, err := shortener.NewGenerator(cfg.CodeLength)
@@ -98,7 +94,7 @@ func newRunCmd() *cobra.Command {
 				return err
 			}
 
-			srv := server.New(cfg, logger, server.Deps{
+			srv := server.New(cfg, logger, server.Deps{ //nolint:contextcheck // slogRequestLogger uses per-request context internally, not the server lifetime ctx
 				Store:     st,
 				Cache:     cc,
 				Generator: gen,

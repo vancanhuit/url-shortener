@@ -1,26 +1,27 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"os"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/vancanhuit/url-shortener/internal/config"
 )
 
-func newConfigCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "Print the resolved configuration (with secrets redacted)",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+func newConfigCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "config",
+		Usage: "Print the resolved configuration (with secrets redacted)",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
 			return enc.Encode(cfg.Redacted())
 		},
 	}
-	return cmd
 }

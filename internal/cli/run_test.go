@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-
 	"github.com/vancanhuit/url-shortener/internal/config"
 )
 
@@ -30,11 +28,9 @@ func TestEnsureSchemaCurrent_AutoMigrateRunsUp(t *testing.T) {
 		return 0, 0, nil
 	}
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(t.Context())
 	cfg := config.Config{AutoMigrate: true, DatabaseURL: "postgres://example"}
 
-	if err := ensureSchemaCurrent(cmd, cfg); err != nil {
+	if err := ensureSchemaCurrent(t.Context(), cfg); err != nil {
 		t.Fatalf("ensureSchemaCurrent() error = %v", err)
 	}
 	if !upCalled {
@@ -61,11 +57,9 @@ func TestEnsureSchemaCurrent_BehindSchemaReturnsActionableError(t *testing.T) {
 		return 3, 4, nil
 	}
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(t.Context())
 	cfg := config.Config{AutoMigrate: false, DatabaseURL: "postgres://example"}
 
-	err := ensureSchemaCurrent(cmd, cfg)
+	err := ensureSchemaCurrent(t.Context(), cfg)
 	if err == nil {
 		t.Fatal("ensureSchemaCurrent() error = nil, want non-nil")
 	}
@@ -91,11 +85,9 @@ func TestEnsureSchemaCurrent_PropagatesVersionsError(t *testing.T) {
 		return 0, 0, want
 	}
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(t.Context())
 	cfg := config.Config{AutoMigrate: false, DatabaseURL: "postgres://example"}
 
-	err := ensureSchemaCurrent(cmd, cfg)
+	err := ensureSchemaCurrent(t.Context(), cfg)
 	if !errors.Is(err, want) {
 		t.Fatalf("ensureSchemaCurrent() error = %v, want %v", err, want)
 	}
