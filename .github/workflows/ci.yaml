@@ -24,7 +24,7 @@ concurrency:
 # matching shell variables when set.
 env:
   GO_VERSION: 1.26.3
-  NODE_VERSION: 24.15.0
+  NODE_VERSION: 24.16.0
   GOLANGCI_LINT_VERSION: 2.11.4
   TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io

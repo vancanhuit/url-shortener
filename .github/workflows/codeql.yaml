@@ -34,7 +34,7 @@ env:
   # first; this workflow re-asserts the literals so a CodeQL run
   # cannot silently fall behind production CI on a Go bump.
   GO_VERSION: 1.26.3
-  NODE_VERSION: 24.15.0
+  NODE_VERSION: 24.16.0
   # See ci.yaml for the rationale on the Node-24 opt-in flag.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 

@@ -42,7 +42,7 @@ concurrency:
 
 env:
   GO_VERSION: 1.26.3
-  NODE_VERSION: 24.15.0
+  NODE_VERSION: 24.16.0
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   # Opt every JS-based action into the Node 24 runtime ahead of the
