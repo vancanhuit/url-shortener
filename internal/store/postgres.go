@@ -20,7 +20,8 @@ import (
 	"github.com/vancanhuit/url-shortener/internal/store/db"
 )
 
-// ErrNotFound is returned by Get when the requested row does not exist.
+// ErrNotFound is returned when a requested row does not exist or has already
+// been soft-deleted and the query filters on deleted_at IS NULL.
 var ErrNotFound = errors.New("store: not found")
 
 // ErrCodeTaken is returned by Create when the unique constraint on
@@ -78,18 +79,14 @@ func IsTransient(err error) bool {
 	return false
 }
 
-// DBTX is satisfied by *pgxpool.Pool (and pgxpool.Conn) as well as pgx.Tx,
-// allowing store methods to participate in caller-managed transactions.
+// DBTX allows store methods to participate in caller-managed transactions.
+// It is an alias for db.DBTX, which is satisfied by pgx.Tx.
 //
 // Convention: pass nil to use the store's own connection pool (the common
-// case -- every current call site does this). Pass a *pgx.Tx obtained from
+// case -- every current call site does this). Pass a pgx.Tx obtained from
 // s.Pool().Begin() only when multiple store operations must be atomic; each
 // method checks for nil and falls back to s.pool automatically.
-type DBTX interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
+type DBTX = db.DBTX
 
 // Link is a row from the `links` table.
 //
@@ -312,11 +309,10 @@ func (s *Store) CreateAutoLink(ctx context.Context, dbtx DBTX, code, targetURL s
 }
 
 // IncrementClicks bumps the click counter on the link with the given
-// code by one. Best-effort: a missing row returns nil (the caller is
-// the redirect handler, which has already verified the row exists, so
-// a concurrent delete -- if one is ever added -- shouldn't surface as
-// an error to the user). Real DB errors are returned so the caller can
-// log them.
+// code by one. Best-effort: a missing or soft-deleted row returns nil
+// (the caller is the redirect handler, which has already verified the
+// row exists, so a concurrent soft-delete shouldn't surface as an error
+// to the user). Real DB errors are returned so the caller can log them.
 func (s *Store) IncrementClicks(ctx context.Context, dbtx DBTX, code string) error {
 	if err := s.queriesFor(dbtx).IncrementClicks(ctx, code); err != nil {
 		return fmt.Errorf("store: increment clicks: %w", err)
@@ -409,12 +405,11 @@ func (s *Store) GetLinkByTargetURL(ctx context.Context, dbtx DBTX, targetURL str
 }
 
 // SoftDeleteLink marks the link with the given code as deleted by
-// stamping deleted_at = now(). It is idempotent in semantic only:
-// the first call returns nil, subsequent calls (or a call against a
-// non-existent code) return ErrNotFound, since the WHERE clause is
-// scoped to live rows so the affected-row count tells the caller
-// whether anything actually changed. Higher layers translate
-// ErrNotFound to 404 the same way they do for GetLinkByCode.
+// stamping deleted_at = now(). It is not idempotent: the WHERE clause
+// filters on deleted_at IS NULL, so a second call (or any call against
+// a non-existent or already-deleted code) returns ErrNotFound via the
+// zero RowsAffected count. Higher layers translate ErrNotFound to 404
+// the same way they do for GetLinkByCode.
 //
 // The row is left in the table -- expires_at, click_count, and
 // every audit column survive the delete -- so a future undelete
