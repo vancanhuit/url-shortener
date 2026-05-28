@@ -14,7 +14,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/vancanhuit/url-shortener/internal/store/db"
 )
 
 // ErrNotFound is returned by Get when the requested row does not exist.
@@ -122,7 +125,8 @@ func (l Link) IsDeleted() bool {
 // Store is the entry point for all DB access. It owns a pgx pool which it
 // also exposes via Pool() so higher layers can begin transactions.
 type Store struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *db.Queries
 }
 
 // PoolConfig collects the pgxpool tunables the service exposes. A zero
@@ -182,7 +186,7 @@ func NewWithPool(ctx context.Context, databaseURL string, pc PoolConfig) (*Store
 		pool.Close()
 		return nil, fmt.Errorf("store: ping: %w", err)
 	}
-	return &Store{pool: pool}, nil
+	return &Store{pool: pool, queries: db.New(pool)}, nil
 }
 
 // applyPoolConfig mutates cfg in place with any non-zero fields from pc.
@@ -218,21 +222,57 @@ func (s *Store) Close() {
 // DBTX argument to store methods.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
+// queriesFor returns a *db.Queries backed by dbtx when non-nil, otherwise
+// returns the store's own pool-backed Queries. This avoids allocating a
+// new Queries on every call when using the pool (the common case).
+func (s *Store) queriesFor(dbtx DBTX) *db.Queries {
+	if dbtx != nil {
+		return db.New(dbtx)
+	}
+	return s.queries
+}
+
+// toLink converts a generated db.Link (which uses pgtype.Timestamptz) to
+// the public store.Link type (which uses time.Time / *time.Time).
+func toLink(l db.Link) Link {
+	return Link{
+		ID:         l.ID,
+		Code:       l.Code,
+		TargetURL:  l.TargetUrl,
+		CreatedAt:  l.CreatedAt.Time,
+		ClickCount: l.ClickCount,
+		ExpiresAt:  pgTimestamptzToPtr(l.ExpiresAt),
+		DeletedAt:  pgTimestamptzToPtr(l.DeletedAt),
+	}
+}
+
+// pgTimestamptzToPtr converts a pgtype.Timestamptz to *time.Time.
+// Returns nil when the column was NULL (Valid == false).
+func pgTimestamptzToPtr(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	return &t.Time
+}
+
+// timePtrToTimestamptz converts a *time.Time to pgtype.Timestamptz.
+// A nil pointer maps to the zero Timestamptz (Valid == false, i.e. NULL).
+func timePtrToTimestamptz(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: *t, Valid: true}
+}
+
 // CreateLink inserts a new link row. expiresAt may be nil for a link
 // that never expires. It returns ErrCodeTaken when the code collides
 // with an existing row.
-func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string, expiresAt *time.Time) (Link, error) {
-	if db == nil {
-		db = s.pool
-	}
-	const q = `
-		INSERT INTO links (code, target_url, expires_at)
-		VALUES ($1, $2, $3)
-		RETURNING id, code, target_url, created_at, click_count, expires_at, deleted_at
-	`
-	var l Link
-	err := db.QueryRow(ctx, q, code, targetURL, expiresAt).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
+func (s *Store) CreateLink(ctx context.Context, dbtx DBTX, code, targetURL string, expiresAt *time.Time) (Link, error) {
+	row, err := s.queriesFor(dbtx).CreateLink(ctx, db.CreateLinkParams{
+		Code:      code,
+		TargetUrl: targetURL,
+		ExpiresAt: timePtrToTimestamptz(expiresAt),
+	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -240,7 +280,7 @@ func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string,
 		}
 		return Link{}, fmt.Errorf("store: create link: %w", err)
 	}
-	return l, nil
+	return toLink(row), nil
 }
 
 // CreateAutoLink atomically inserts a permanent auto-generated link or
@@ -253,21 +293,11 @@ func (s *Store) CreateLink(ctx context.Context, db DBTX, code, targetURL string,
 // existing row was returned (dedup hit). ErrCodeTaken is returned when
 // the proposed code collides with a different existing row on the unique
 // code constraint; callers should generate a fresh code and retry.
-func (s *Store) CreateAutoLink(ctx context.Context, db DBTX, code, targetURL string) (Link, bool, error) {
-	if db == nil {
-		db = s.pool
-	}
-	const q = `
-		INSERT INTO links (code, target_url, expires_at, auto_dedup)
-		VALUES ($1, $2, NULL, true)
-		ON CONFLICT (target_url)
-		WHERE auto_dedup = true AND expires_at IS NULL AND deleted_at IS NULL
-		DO UPDATE SET code = links.code
-		RETURNING id, code, target_url, created_at, click_count, expires_at, deleted_at
-	`
-	var l Link
-	err := db.QueryRow(ctx, q, code, targetURL).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
+func (s *Store) CreateAutoLink(ctx context.Context, dbtx DBTX, code, targetURL string) (Link, bool, error) {
+	row, err := s.queriesFor(dbtx).CreateAutoLink(ctx, db.CreateAutoLinkParams{
+		Code:      code,
+		TargetUrl: targetURL,
+	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -277,8 +307,8 @@ func (s *Store) CreateAutoLink(ctx context.Context, db DBTX, code, targetURL str
 	}
 	// A freshly inserted row comes back with the code we proposed.
 	// An ON CONFLICT hit returns the existing row's code instead.
-	created := l.Code == code
-	return l, created, nil
+	created := row.Code == code
+	return toLink(row), created, nil
 }
 
 // IncrementClicks bumps the click counter on the link with the given
@@ -287,12 +317,8 @@ func (s *Store) CreateAutoLink(ctx context.Context, db DBTX, code, targetURL str
 // a concurrent delete -- if one is ever added -- shouldn't surface as
 // an error to the user). Real DB errors are returned so the caller can
 // log them.
-func (s *Store) IncrementClicks(ctx context.Context, db DBTX, code string) error {
-	if db == nil {
-		db = s.pool
-	}
-	const q = `UPDATE links SET click_count = click_count + 1 WHERE code = $1`
-	if _, err := db.Exec(ctx, q, code); err != nil {
+func (s *Store) IncrementClicks(ctx context.Context, dbtx DBTX, code string) error {
+	if err := s.queriesFor(dbtx).IncrementClicks(ctx, code); err != nil {
 		return fmt.Errorf("store: increment clicks: %w", err)
 	}
 	return nil
@@ -305,10 +331,7 @@ func (s *Store) IncrementClicks(ctx context.Context, db DBTX, code string) error
 //
 // limit is clamped to a sane maximum so callers can pass user-supplied
 // page sizes without worrying about runaway queries.
-func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int64) ([]Link, error) {
-	if db == nil {
-		db = s.pool
-	}
+func (s *Store) ListLinks(ctx context.Context, dbtx DBTX, limit int, beforeID int64) ([]Link, error) {
 	const maxLimit = 200
 	switch {
 	case limit <= 0:
@@ -317,51 +340,27 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 		limit = maxLimit
 	}
 
+	q := s.queriesFor(dbtx)
 	var (
-		rows pgx.Rows
+		rows []db.Link
 		err  error
 	)
 	// Soft-deleted and expired rows are filtered out of the recent list.
-	// The deleted_at IS NOT NULL partial index keeps the deleted-row filter
-	// cheap regardless of volume; the expires_at condition uses the same
-	// index scan because expired rows are a small fraction of the table.
 	if beforeID > 0 {
-		const q = `
-			SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
-			FROM links
-			WHERE id < $1
-			  AND deleted_at IS NULL
-			  AND (expires_at IS NULL OR expires_at > NOW())
-			ORDER BY id DESC
-			LIMIT $2
-		`
-		rows, err = db.Query(ctx, q, beforeID, limit)
+		rows, err = q.ListLinksBeforeID(ctx, db.ListLinksBeforeIDParams{
+			ID:    beforeID,
+			Limit: int32(limit),
+		})
 	} else {
-		const q = `
-			SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
-			FROM links
-			WHERE deleted_at IS NULL
-			  AND (expires_at IS NULL OR expires_at > NOW())
-			ORDER BY id DESC
-			LIMIT $1
-		`
-		rows, err = db.Query(ctx, q, limit)
+		rows, err = q.ListLinks(ctx, int32(limit))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: list links: %w", err)
 	}
-	defer rows.Close()
 
-	out := make([]Link, 0, limit)
-	for rows.Next() {
-		var l Link
-		if err := rows.Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt); err != nil {
-			return nil, fmt.Errorf("store: list links: scan: %w", err)
-		}
-		out = append(out, l)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list links: rows: %w", err)
+	out := make([]Link, len(rows))
+	for i, row := range rows {
+		out[i] = toLink(row)
 	}
 	return out, nil
 }
@@ -370,25 +369,15 @@ func (s *Store) ListLinks(ctx context.Context, db DBTX, limit int, beforeID int6
 // the row is missing. Expired and soft-deleted rows are still returned
 // so callers can distinguish 410 from 404 themselves; check
 // Link.IsExpired and Link.IsDeleted.
-func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, error) {
-	if db == nil {
-		db = s.pool
-	}
-	const q = `
-		SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
-		FROM links
-		WHERE code = $1
-	`
-	var l Link
-	err := db.QueryRow(ctx, q, code).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
+func (s *Store) GetLinkByCode(ctx context.Context, dbtx DBTX, code string) (Link, error) {
+	row, err := s.queriesFor(dbtx).GetLinkByCode(ctx, code)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Link{}, ErrNotFound
 		}
 		return Link{}, fmt.Errorf("store: get link by code: %w", err)
 	}
-	return l, nil
+	return toLink(row), nil
 }
 
 // GetLinkByTargetURL returns the oldest non-expired, non-deleted
@@ -408,29 +397,15 @@ func (s *Store) GetLinkByCode(ctx context.Context, db DBTX, code string) (Link, 
 // behavior.
 //
 // Returns ErrNotFound when no row matches.
-func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL string) (Link, error) {
-	if db == nil {
-		db = s.pool
-	}
-	const q = `
-		SELECT id, code, target_url, created_at, click_count, expires_at, deleted_at
-		FROM links
-		WHERE target_url = $1
-		  AND expires_at IS NULL
-		  AND deleted_at IS NULL
-		ORDER BY id ASC
-		LIMIT 1
-	`
-	var l Link
-	err := db.QueryRow(ctx, q, targetURL).
-		Scan(&l.ID, &l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt, &l.DeletedAt)
+func (s *Store) GetLinkByTargetURL(ctx context.Context, dbtx DBTX, targetURL string) (Link, error) {
+	row, err := s.queriesFor(dbtx).GetLinkByTargetURL(ctx, targetURL)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Link{}, ErrNotFound
 		}
 		return Link{}, fmt.Errorf("store: get link by target url: %w", err)
 	}
-	return l, nil
+	return toLink(row), nil
 }
 
 // SoftDeleteLink marks the link with the given code as deleted by
@@ -445,17 +420,8 @@ func (s *Store) GetLinkByTargetURL(ctx context.Context, db DBTX, targetURL strin
 // every audit column survive the delete -- so a future undelete
 // recipe could clear deleted_at and bring the link back if the
 // product ever needs it.
-func (s *Store) SoftDeleteLink(ctx context.Context, db DBTX, code string) error {
-	if db == nil {
-		db = s.pool
-	}
-	const q = `
-		UPDATE links
-		SET deleted_at = now()
-		WHERE code = $1
-		  AND deleted_at IS NULL
-	`
-	tag, err := db.Exec(ctx, q, code)
+func (s *Store) SoftDeleteLink(ctx context.Context, dbtx DBTX, code string) error {
+	tag, err := s.queriesFor(dbtx).SoftDeleteLink(ctx, code)
 	if err != nil {
 		return fmt.Errorf("store: soft delete link: %w", err)
 	}
