@@ -1,30 +1,21 @@
 package cli
 
 import (
-	"github.com/spf13/cobra"
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/urfave/cli/v3"
 
 	"github.com/vancanhuit/url-shortener/internal/config"
 	"github.com/vancanhuit/url-shortener/internal/migrate"
 )
 
-// migrateFlags is shared by every `migrate` subcommand. The --database-url
-// flag overrides URL_SHORTENER_DATABASE_URL, so callers (e.g. CI) can apply
-// migrations against a separately-configured database (e.g. one named via
-// URL_SHORTENER_TEST_DATABASE_URL) without polluting the app's runtime env.
-type migrateFlags struct {
-	databaseURL string
-}
-
-func (f *migrateFlags) bind(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVar(&f.databaseURL, "database-url", "",
-		"Postgres connection string (overrides URL_SHORTENER_DATABASE_URL)")
-}
-
-// resolve picks the explicit --database-url flag when given, otherwise
+// resolveDBURL picks the explicit --database-url flag when given, otherwise
 // falls back to the value loaded from the environment.
-func (f *migrateFlags) resolve() (string, error) {
-	if f.databaseURL != "" {
-		return f.databaseURL, nil
+func resolveDBURL(cmd *cli.Command) (string, error) {
+	if url := cmd.String("database-url"); url != "" {
+		return url, nil
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -33,96 +24,107 @@ func (f *migrateFlags) resolve() (string, error) {
 	return cfg.DatabaseURL, nil
 }
 
-func newMigrateCmd() *cobra.Command {
-	flags := &migrateFlags{}
-	cmd := &cobra.Command{
-		Use:   "migrate",
-		Short: "Run database migrations",
-		Long:  "Apply, roll back, or inspect database migrations using the embedded SQL files.",
+func dbURLFlag() *cli.StringFlag {
+	return &cli.StringFlag{
+		Name:  "database-url",
+		Usage: "Postgres connection string (overrides URL_SHORTENER_DATABASE_URL)",
 	}
-	flags.bind(cmd)
-	cmd.AddCommand(
-		newMigrateUpCmd(flags),
-		newMigrateDownCmd(flags),
-		newMigrateStatusCmd(flags),
-		newMigrateRedoCmd(flags),
-		newMigrateCreateCmd(),
-	)
-	return cmd
 }
 
-func newMigrateUpCmd(flags *migrateFlags) *cobra.Command {
-	return &cobra.Command{
-		Use:   "up",
-		Short: "Apply all pending migrations",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			url, err := flags.resolve()
+func newMigrateCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "migrate",
+		Usage: "Apply, roll back, or inspect database migrations using the embedded SQL files.",
+		Commands: []*cli.Command{
+			newMigrateUpCmd(),
+			newMigrateDownCmd(),
+			newMigrateStatusCmd(),
+			newMigrateRedoCmd(),
+			newMigrateCreateCmd(),
+		},
+	}
+}
+
+func newMigrateUpCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "up",
+		Usage: "Apply all pending migrations",
+		Flags: []cli.Flag{dbURLFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			url, err := resolveDBURL(cmd)
 			if err != nil {
 				return err
 			}
-			return migrate.Up(cmd.Context(), url)
+			return migrate.Up(ctx, url)
 		},
 	}
 }
 
-func newMigrateDownCmd(flags *migrateFlags) *cobra.Command {
-	return &cobra.Command{
-		Use:   "down",
-		Short: "Roll back the most recent migration",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			url, err := flags.resolve()
+func newMigrateDownCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "down",
+		Usage: "Roll back the most recent migration",
+		Flags: []cli.Flag{dbURLFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			url, err := resolveDBURL(cmd)
 			if err != nil {
 				return err
 			}
-			return migrate.Down(cmd.Context(), url)
+			return migrate.Down(ctx, url)
 		},
 	}
 }
 
-func newMigrateStatusCmd(flags *migrateFlags) *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Print the migration status",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			url, err := flags.resolve()
+func newMigrateStatusCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "status",
+		Usage: "Print the migration status",
+		Flags: []cli.Flag{dbURLFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			url, err := resolveDBURL(cmd)
 			if err != nil {
 				return err
 			}
-			return migrate.Status(cmd.Context(), url)
+			return migrate.Status(ctx, url)
 		},
 	}
 }
 
-func newMigrateRedoCmd(flags *migrateFlags) *cobra.Command {
-	return &cobra.Command{
-		Use:   "redo",
-		Short: "Roll back the most recent migration and re-apply it",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			url, err := flags.resolve()
+func newMigrateRedoCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "redo",
+		Usage: "Roll back the most recent migration and re-apply it",
+		Flags: []cli.Flag{dbURLFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			url, err := resolveDBURL(cmd)
 			if err != nil {
 				return err
 			}
-			return migrate.Redo(cmd.Context(), url)
+			return migrate.Redo(ctx, url)
 		},
 	}
 }
 
-func newMigrateCreateCmd() *cobra.Command {
-	var dir string
-	var migrationType string
-	cmd := &cobra.Command{
-		Use:   "create <name>",
-		Short: "Create a new sequential SQL migration file",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := migrate.Create(dir, args[0], migrationType); err != nil {
+func newMigrateCreateCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "create",
+		Usage:     "Create a new sequential SQL migration file",
+		ArgsUsage: "<name>",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "dir", Value: "migrations", Usage: "Directory to write the new migration file into"},
+			&cli.StringFlag{Name: "type", Value: "sql", Usage: "Migration type: sql or go"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() != 1 {
+				return fmt.Errorf("migrate create: expected exactly one argument <name>, got %d", cmd.NArg())
+			}
+			name := cmd.Args().Get(0)
+			dir := cmd.String("dir")
+			if err := migrate.Create(dir, name, cmd.String("type")); err != nil {
 				return err
 			}
-			cmd.Printf("Created migration: %s/%s\n", dir, args[0])
-			return nil
+			_, err := fmt.Fprintf(os.Stdout, "Created migration: %s/%s\n", dir, name)
+			return err
 		},
 	}
-	cmd.Flags().StringVar(&dir, "dir", "migrations", "Directory to write the new migration file into")
-	cmd.Flags().StringVar(&migrationType, "type", "sql", "Migration type: sql or go")
-	return cmd
 }

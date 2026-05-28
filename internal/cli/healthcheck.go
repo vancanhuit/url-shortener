@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 )
 
 // newHealthcheckCmd is the binary's own probe -- handy as a Docker
@@ -22,17 +22,32 @@ import (
 // `--url=https://127.0.0.1:8443/healthz --insecure` so the probe
 // skips cert verification -- the certificate is intended for the
 // outside world, not the in-container loopback hop.
-func newHealthcheckCmd() *cobra.Command {
-	var (
-		url      string
-		timeout  time.Duration
-		insecure bool
-	)
-	cmd := &cobra.Command{
-		Use:   "healthcheck",
-		Short: "Probe the local /healthz endpoint and exit 0 when it returns 200",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+func newHealthcheckCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "healthcheck",
+		Usage: "Probe the local /healthz endpoint and exit 0 when it returns 200",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "url",
+				Value: "http://127.0.0.1:8080/healthz",
+				Usage: "URL to probe",
+			},
+			&cli.DurationFlag{
+				Name:  "timeout",
+				Value: 2 * time.Second,
+				Usage: "request timeout",
+			},
+			&cli.BoolFlag{
+				Name:  "insecure",
+				Usage: "skip TLS certificate verification (use with https:// URLs in compose healthchecks)",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			url := cmd.String("url")
+			timeout := cmd.Duration("timeout")
+			insecure := cmd.Bool("insecure")
+
+			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -64,8 +79,4 @@ func newHealthcheckCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&url, "url", "http://127.0.0.1:8080/healthz", "URL to probe")
-	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Second, "request timeout")
-	cmd.Flags().BoolVar(&insecure, "insecure", false, "skip TLS certificate verification (use with https:// URLs in compose healthchecks)")
-	return cmd
 }
