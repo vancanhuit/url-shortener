@@ -8,7 +8,7 @@
 # nonroot, which is itself a multi-arch manifest.
 
 ARG GO_VERSION=1.26.3
-ARG NODE_VERSION=24.15.0
+ARG NODE_VERSION=24.16.0
 
 # -----------------------------------------------------------------------------
 # Web-assets stage: build the Vite + Svelte SPA into web/dist/.
