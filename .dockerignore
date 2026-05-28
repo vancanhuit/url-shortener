@@ -12,6 +12,7 @@ coverage.html
 
 # Local Node tooling (not needed inside the Go image build)
 node_modules/
+web/node_modules/
 
 # Vite SPA output is rebuilt inside the web-builder stage; never
 # ship a stale local build into the image build context.

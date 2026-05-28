@@ -6,24 +6,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 )
 
-// newSecureEchoForTest wires the secure-headers middleware onto a stub
+// newSecureRouterForTest wires the secure-headers middleware onto a stub
 // handler returning 200 so the response headers are observable.
-func newSecureEchoForTest(t *testing.T) *echo.Echo {
+func newSecureRouterForTest(t *testing.T) chi.Router {
 	t.Helper()
-	e := echo.New()
-	e.Use(buildSecureHeaders())
-	e.GET("/", func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
-	return e
+	r := chi.NewRouter()
+	r.Use(buildSecureHeaders())
+	r.Get("/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	return r
 }
 
-func doPlainRequest(t *testing.T, e *echo.Echo) *httptest.ResponseRecorder {
+func doPlainRequest(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -31,7 +31,7 @@ func doPlainRequest(t *testing.T, e *echo.Echo) *httptest.ResponseRecorder {
 // carries X-Content-Type-Options: nosniff to prevent MIME-type sniffing.
 func TestSecureHeaders_XContentTypeOptions(t *testing.T) {
 	t.Parallel()
-	rec := doPlainRequest(t, newSecureEchoForTest(t))
+	rec := doPlainRequest(t, newSecureRouterForTest(t))
 	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want %q", got, "nosniff")
 	}
@@ -41,7 +41,7 @@ func TestSecureHeaders_XContentTypeOptions(t *testing.T) {
 // X-Frame-Options: SAMEORIGIN to defend against clickjacking.
 func TestSecureHeaders_XFrameOptions(t *testing.T) {
 	t.Parallel()
-	rec := doPlainRequest(t, newSecureEchoForTest(t))
+	rec := doPlainRequest(t, newSecureRouterForTest(t))
 	if got := rec.Header().Get("X-Frame-Options"); got != "SAMEORIGIN" {
 		t.Errorf("X-Frame-Options = %q, want %q", got, "SAMEORIGIN")
 	}
@@ -50,7 +50,7 @@ func TestSecureHeaders_XFrameOptions(t *testing.T) {
 // TestSecureHeaders_ReferrerPolicy verifies the Referrer-Policy header.
 func TestSecureHeaders_ReferrerPolicy(t *testing.T) {
 	t.Parallel()
-	rec := doPlainRequest(t, newSecureEchoForTest(t))
+	rec := doPlainRequest(t, newSecureRouterForTest(t))
 	want := "strict-origin-when-cross-origin"
 	if got := rec.Header().Get("Referrer-Policy"); got != want {
 		t.Errorf("Referrer-Policy = %q, want %q", got, want)
@@ -59,10 +59,10 @@ func TestSecureHeaders_ReferrerPolicy(t *testing.T) {
 
 // TestSecureHeaders_NoHSTSOverPlainHTTP verifies that
 // Strict-Transport-Security is NOT emitted for plain HTTP requests;
-// Echo only sets it when the request is TLS or X-Forwarded-Proto: https.
+// the middleware only sets it when the request is TLS or X-Forwarded-Proto: https.
 func TestSecureHeaders_NoHSTSOverPlainHTTP(t *testing.T) {
 	t.Parallel()
-	rec := doPlainRequest(t, newSecureEchoForTest(t))
+	rec := doPlainRequest(t, newSecureRouterForTest(t))
 	if got := rec.Header().Get("Strict-Transport-Security"); got != "" {
 		t.Errorf("Strict-Transport-Security should be empty for HTTP, got %q", got)
 	}
@@ -73,12 +73,12 @@ func TestSecureHeaders_NoHSTSOverPlainHTTP(t *testing.T) {
 // HTTPS via X-Forwarded-Proto.
 func TestSecureHeaders_HSTSViaXForwardedProto(t *testing.T) {
 	t.Parallel()
-	e := newSecureEchoForTest(t)
+	h := newSecureRouterForTest(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, req)
 
 	hsts := rec.Header().Get("Strict-Transport-Security")
 	if hsts == "" {
@@ -95,7 +95,7 @@ func TestSecureHeaders_HSTSViaXForwardedProto(t *testing.T) {
 // directives that guard against XSS and clickjacking.
 func TestSecureHeaders_CSP(t *testing.T) {
 	t.Parallel()
-	rec := doPlainRequest(t, newSecureEchoForTest(t))
+	rec := doPlainRequest(t, newSecureRouterForTest(t))
 	got := rec.Header().Get("Content-Security-Policy")
 	if got == "" {
 		t.Fatal("Content-Security-Policy header missing")

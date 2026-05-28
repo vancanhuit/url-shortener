@@ -94,7 +94,7 @@ func newRunCmd() *cli.Command {
 				return err
 			}
 
-			srv := server.New(cfg, logger, server.Deps{ //nolint:contextcheck // slogRequestLogger uses per-request context internally, not the server lifetime ctx
+			srv := server.New(cfg, logger, server.Deps{
 				Store:     st,
 				Cache:     cc,
 				Generator: gen,

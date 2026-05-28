@@ -7,31 +7,31 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
 
-// newMetricsEchoForTest wires a fresh metrics middleware and an
-// isolated registry onto a minimal Echo instance and registers the
+// newMetricsRouterForTest wires a fresh metrics middleware and an
+// isolated registry onto a minimal Chi router and registers the
 // routes given by the caller.
-func newMetricsEchoForTest(
+func newMetricsRouterForTest(
 	t *testing.T,
 	routes map[string]int, // path -> response status
-) (*echo.Echo, *prometheus.CounterVec, *prometheus.HistogramVec) {
+) (chi.Router, *prometheus.CounterVec, *prometheus.HistogramVec) {
 	t.Helper()
 	reg := prometheus.NewRegistry()
 	total, dur := newRequestMetrics(reg)
 
-	e := echo.New()
-	e.Use(buildMetricsMiddleware(total, dur))
+	r := chi.NewRouter()
+	r.Use(buildMetricsMiddleware(total, dur))
 	for path, status := range routes {
 		s := status
-		e.GET(path, func(c *echo.Context) error {
-			return c.NoContent(s)
+		r.Get(path, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(s)
 		})
 	}
-	return e, total, dur
+	return r, total, dur
 }
 
 // counterValue extracts the current value of a CounterVec cell
@@ -53,13 +53,13 @@ func counterValue(t *testing.T, cv *prometheus.CounterVec, lvs ...string) float6
 // increments http_requests_total by one with the correct labels.
 func TestMetricsMiddleware_CountsRequests(t *testing.T) {
 	t.Parallel()
-	e, total, _ := newMetricsEchoForTest(t, map[string]int{
+	r, total, _ := newMetricsRouterForTest(t, map[string]int{
 		"/healthz": http.StatusOK,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -74,11 +74,15 @@ func TestMetricsMiddleware_CountsRequests(t *testing.T) {
 // URL (which would be unbounded-cardinality).
 func TestMetricsMiddleware_LabelsUnmatchedRoute(t *testing.T) {
 	t.Parallel()
-	e, total, _ := newMetricsEchoForTest(t, map[string]int{})
+	// Register a real route so chi builds its handler (without at least one
+	// route, chi bypasses the middleware chain for 404s entirely).
+	r, total, _ := newMetricsRouterForTest(t, map[string]int{
+		"/some-known-path": http.StatusOK,
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if got := counterValue(t, total, "GET", "unmatched", "404"); got != 1 {
 		t.Errorf("http_requests_total{GET,unmatched,404} = %v, want 1", got)
@@ -89,13 +93,13 @@ func TestMetricsMiddleware_LabelsUnmatchedRoute(t *testing.T) {
 // returning a non-2xx status code is labeled with that code.
 func TestMetricsMiddleware_RecordsErrorStatusCode(t *testing.T) {
 	t.Parallel()
-	e, total, _ := newMetricsEchoForTest(t, map[string]int{
+	r, total, _ := newMetricsRouterForTest(t, map[string]int{
 		"/boom": http.StatusInternalServerError,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if got := counterValue(t, total, "GET", "/boom", "500"); got != 1 {
 		t.Errorf("http_requests_total{GET,/boom,500} = %v, want 1", got)
@@ -106,13 +110,13 @@ func TestMetricsMiddleware_RecordsErrorStatusCode(t *testing.T) {
 // has at least one observation for a completed request.
 func TestMetricsMiddleware_RecordsDuration(t *testing.T) {
 	t.Parallel()
-	e, _, dur := newMetricsEchoForTest(t, map[string]int{
+	r, _, dur := newMetricsRouterForTest(t, map[string]int{
 		"/ping": http.StatusOK,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	h, err := dur.GetMetricWithLabelValues("GET", "/ping")
 	if err != nil {
@@ -136,12 +140,12 @@ func TestMetricsMiddleware_RecordsDuration(t *testing.T) {
 func TestMetricsEndpoint_Returns200(t *testing.T) {
 	t.Parallel()
 	reg := newMetricsRegistry()
-	e := echo.New()
-	mountMetrics(e, reg)
+	r := chi.NewRouter()
+	mountMetrics(r, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

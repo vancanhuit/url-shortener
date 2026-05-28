@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/vancanhuit/url-shortener/internal/buildinfo"
 )
@@ -50,29 +50,29 @@ func (h *Operational) AddReadinessCheck(name string, check func(ctx context.Cont
 	h.checks[name] = pingFunc(check)
 }
 
-// Mount registers /healthz, /readyz, /version on e.
-func (h *Operational) Mount(e *echo.Echo) {
-	e.GET("/healthz", h.Healthz)
-	e.GET("/readyz", h.Readyz)
-	e.GET("/version", h.Version)
+// Mount registers /healthz, /readyz, /version on r.
+func (h *Operational) Mount(r chi.Router) {
+	r.Get("/healthz", h.Healthz)
+	r.Get("/readyz", h.Readyz)
+	r.Get("/version", h.Version)
 }
 
 // Healthz is the liveness probe: it returns 200 as long as the process is
 // running and the HTTP stack is responsive. It deliberately has no
 // dependencies so a flapping database does not cause restarts.
-func (h *Operational) Healthz(c *echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+func (h *Operational) Healthz(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // Readyz runs every registered readiness check and returns 200 only when all
 // pass. The response body lists per-check results so operators can see which
 // dependency is unhappy.
-func (h *Operational) Readyz(c *echo.Context) error {
+func (h *Operational) Readyz(w http.ResponseWriter, r *http.Request) {
 	results := make(map[string]string, len(h.checks)+1)
 	allOK := true
 
 	for name, ck := range h.checks {
-		ctx, cancel := context.WithTimeout(c.Request().Context(), h.readyTimeout)
+		ctx, cancel := context.WithTimeout(r.Context(), h.readyTimeout)
 		err := ck.CheckReady(ctx)
 		cancel()
 		if err != nil {
@@ -85,13 +85,14 @@ func (h *Operational) Readyz(c *echo.Context) error {
 
 	if allOK {
 		results["status"] = "ok"
-		return c.JSON(http.StatusOK, results)
+		writeJSON(w, http.StatusOK, results)
+		return
 	}
 	results["status"] = "unready"
-	return c.JSON(http.StatusServiceUnavailable, results)
+	writeJSON(w, http.StatusServiceUnavailable, results)
 }
 
 // Version returns the build metadata baked into the binary.
-func (h *Operational) Version(c *echo.Context) error {
-	return c.JSON(http.StatusOK, buildinfo.Get())
+func (h *Operational) Version(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, buildinfo.Get())
 }

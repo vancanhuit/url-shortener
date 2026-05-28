@@ -7,7 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 )
@@ -28,7 +28,7 @@ func fakeDist() fstest.MapFS {
 	}
 }
 
-func newSPAEcho(t *testing.T) *echo.Echo {
+func newSPARouter(t *testing.T) chi.Router {
 	t.Helper()
 	dist := fakeDist()
 	idx, err := dist.ReadFile("index.html")
@@ -39,18 +39,18 @@ func newSPAEcho(t *testing.T) *echo.Echo {
 		DistFS:    dist,
 		IndexHTML: idx,
 	})
-	e := echo.New()
-	spa.Mount(e)
-	return e
+	r := chi.NewRouter()
+	spa.Mount(r)
+	return r
 }
 
 func TestSPA_IndexServesEmbeddedHTMLWithNoCacheHeaders(t *testing.T) {
 	t.Parallel()
-	e := newSPAEcho(t)
+	r := newSPARouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -72,12 +72,12 @@ func TestSPA_IndexServesEmbeddedHTMLWithNoCacheHeaders(t *testing.T) {
 
 func TestSPA_HashedAssetsAreServedAsImmutable(t *testing.T) {
 	t.Parallel()
-	e := newSPAEcho(t)
+	r := newSPARouter(t)
 
 	for _, path := range []string{"/assets/index-abc123.js", "/assets/index-abc123.css"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		r.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d", path, rec.Code)
@@ -94,12 +94,12 @@ func TestSPA_HashedAssetsAreServedAsImmutable(t *testing.T) {
 
 func TestSPA_StaticVendoredAssetsAreServedWithRevalidate(t *testing.T) {
 	t.Parallel()
-	e := newSPAEcho(t)
+	r := newSPARouter(t)
 
 	for _, path := range []string{"/static/swagger-ui.css", "/static/redoc.standalone.js"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		r.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d", path, rec.Code)
@@ -115,11 +115,11 @@ func TestSPA_StaticVendoredAssetsAreServedWithRevalidate(t *testing.T) {
 
 func TestSPA_UnknownAssetReturns404(t *testing.T) {
 	t.Parallel()
-	e := newSPAEcho(t)
+	r := newSPARouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/assets/nope.js", nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}

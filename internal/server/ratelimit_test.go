@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 
+	"github.com/vancanhuit/url-shortener/api"
 	"github.com/vancanhuit/url-shortener/internal/config"
-	"github.com/vancanhuit/url-shortener/internal/handlers"
 )
 
 // fakeRateLimiter is a thread-safe in-process rateLimiter that mirrors
@@ -53,7 +53,7 @@ func TestBuildCreateRateLimiter_DisabledByDefault(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{} // zero value, RateLimitRPS=0
 	// rl is nil intentionally: the function must return before touching it.
-	if got := buildCreateRateLimiter(cfg, nil, slog.New(slog.DiscardHandler)); got != nil {
+	if got := buildCreateRateLimiter(cfg, nil, nil, slog.New(slog.DiscardHandler)); got != nil {
 		t.Errorf("buildCreateRateLimiter(rps=0) = %d middleware, want nil", len(got))
 	}
 }
@@ -65,23 +65,23 @@ func TestBuildCreateRateLimiter_DisabledByDefault(t *testing.T) {
 func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 2}
-	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler))
 	if len(mws) != 1 {
 		t.Fatalf("buildCreateRateLimiter mws = %d, want 1", len(mws))
 	}
 
-	e := echo.New()
+	r := chi.NewRouter()
 	hits := 0
-	e.POST("/x", func(c *echo.Context) error {
+	r.With(mws...).Post("/x", func(w http.ResponseWriter, _ *http.Request) {
 		hits++
-		return c.NoContent(http.StatusCreated)
-	}, mws...)
+		w.WriteHeader(http.StatusCreated)
+	})
 
 	do := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(""))
 		req.RemoteAddr = "203.0.113.7:1234"
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		r.ServeHTTP(rec, req)
 		return rec
 	}
 
@@ -103,12 +103,12 @@ func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(rec.Body)
-	var resp handlers.ErrorResponse
+	var resp api.ErrorResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("unmarshal: %v (body=%q)", err, string(body))
 	}
-	if resp.Code != handlers.ErrCodeRateLimited {
-		t.Errorf("error code = %q, want %q", resp.Code, handlers.ErrCodeRateLimited)
+	if resp.Code != api.ErrorResponseCodeRateLimited {
+		t.Errorf("error code = %q, want %q", resp.Code, api.ErrorResponseCodeRateLimited)
 	}
 	if !strings.Contains(strings.ToLower(resp.Error), "rate limit") {
 		t.Errorf("error message = %q, want substring 'rate limit'", resp.Error)
@@ -122,18 +122,18 @@ func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 func TestBuildCreateRateLimiter_PerIPIsolation(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 1}
-	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler))
 
-	e := echo.New()
-	e.POST("/x", func(c *echo.Context) error {
-		return c.NoContent(http.StatusCreated)
-	}, mws...)
+	r := chi.NewRouter()
+	r.With(mws...).Post("/x", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
 
 	do := func(ip string) int {
 		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(""))
 		req.RemoteAddr = ip + ":1234"
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		r.ServeHTTP(rec, req)
 		return rec.Code
 	}
 
@@ -157,15 +157,15 @@ func TestBuildCreateRateLimiter_PerIPIsolation(t *testing.T) {
 func TestBuildCreateRateLimiter_BurstDerivedFromRPS(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 0.25, RateLimitBurst: 0}
-	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler))
 
-	e := echo.New()
-	e.POST("/x", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) }, mws...)
+	r := chi.NewRouter()
+	r.With(mws...).Post("/x", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })
 
 	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(""))
 	req.RemoteAddr = "192.0.2.1:1234"
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Errorf("first call status = %d, want 201 (burst floor of 1 must apply)", rec.Code)
 	}
@@ -179,20 +179,20 @@ func TestBuildCreateRateLimiter_FailOpen(t *testing.T) {
 
 	errRL := &errorRateLimiter{}
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 1}
-	mws := buildCreateRateLimiter(cfg, errRL, slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, errRL, nil, slog.New(slog.DiscardHandler))
 
-	e := echo.New()
+	r := chi.NewRouter()
 	hits := 0
-	e.POST("/x", func(c *echo.Context) error {
+	r.With(mws...).Post("/x", func(w http.ResponseWriter, _ *http.Request) {
 		hits++
-		return c.NoContent(http.StatusCreated)
-	}, mws...)
+		w.WriteHeader(http.StatusCreated)
+	})
 
 	for i := range 3 {
 		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(""))
 		req.RemoteAddr = "203.0.113.1:1234"
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		r.ServeHTTP(rec, req)
 		if rec.Code != http.StatusCreated {
 			t.Errorf("request %d: status = %d, want 201 (fail-open)", i+1, rec.Code)
 		}

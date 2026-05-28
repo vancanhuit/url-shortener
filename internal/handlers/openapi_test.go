@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/vancanhuit/url-shortener/internal/handlers"
 )
 
 // TestMountOpenAPI covers all four meta endpoints in one test: each
-// goes through the same Echo wiring, and running them together is
+// uses the same Chi router setup, and running them together is
 // faster than spinning up four servers.
 //
 // The assertions are deliberately loose on body contents -- the
@@ -23,19 +23,19 @@ import (
 // surface actually promises clients.
 func TestMountOpenAPI(t *testing.T) {
 	t.Parallel()
-	e := echo.New()
-	handlers.MountOpenAPI(e)
+	r := chi.NewRouter()
+	handlers.MountOpenAPI(r)
 
 	t.Run("json", func(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		r.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
-		ct := rec.Header().Get(echo.HeaderContentType)
+		ct := rec.Header().Get("Content-Type")
 		if !strings.Contains(ct, "application/json") {
 			t.Errorf("Content-Type = %q, want application/json...", ct)
 		}
@@ -50,8 +50,8 @@ func TestMountOpenAPI(t *testing.T) {
 		if err := json.Unmarshal(body, &doc); err != nil {
 			t.Fatalf("body is not valid JSON: %v", err)
 		}
-		if doc["openapi"] != "3.1.0" {
-			t.Errorf("openapi = %v, want 3.1.0", doc["openapi"])
+		if doc["openapi"] != "3.0.3" {
+			t.Errorf("openapi = %v, want 3.0.3", doc["openapi"])
 		}
 	})
 
@@ -59,12 +59,12 @@ func TestMountOpenAPI(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.yaml", nil)
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		r.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
-		ct := rec.Header().Get(echo.HeaderContentType)
+		ct := rec.Header().Get("Content-Type")
 		if !strings.Contains(ct, "application/yaml") {
 			t.Errorf("Content-Type = %q, want application/yaml...", ct)
 		}
@@ -73,12 +73,12 @@ func TestMountOpenAPI(t *testing.T) {
 			t.Fatalf("read body: %v", err)
 		}
 		// Sanity check: the YAML source has to declare
-		// `openapi: 3.1.x` somewhere. The check skips a head
+		// `openapi: 3.0.x` somewhere. The check skips a head
 		// window because the spec leads with a substantial
 		// comment block; matching anywhere in the document is
 		// enough to prove we served the right file.
-		if !strings.Contains(string(body), "\nopenapi: 3.1") {
-			t.Errorf("body does not contain an `openapi: 3.1` pragma at column 0")
+		if !strings.Contains(string(body), "\nopenapi: 3.0") {
+			t.Errorf("body does not contain an `openapi: 3.0` pragma at column 0")
 		}
 	})
 
@@ -102,12 +102,12 @@ func TestMountOpenAPI(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			rec := httptest.NewRecorder()
-			e.ServeHTTP(rec, req)
+			r.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", rec.Code)
 			}
-			ct := rec.Header().Get(echo.HeaderContentType)
+			ct := rec.Header().Get("Content-Type")
 			if !strings.Contains(ct, "text/html") {
 				t.Errorf("Content-Type = %q, want text/html...", ct)
 			}

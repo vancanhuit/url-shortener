@@ -219,6 +219,12 @@ test:
 store-gen:
     go tool sqlc generate
 
+# Regenerate oapi-codegen typed server code from api/openapi.yaml.
+# Run this whenever the OpenAPI spec changes, then commit the output.
+[group("dev")]
+api-gen:
+    go tool oapi-codegen -config api/cfg.yaml api/openapi.yaml
+
 # Run the integration suite end-to-end. Brings up the `test`-profile
 # infra (db-test + redis-test on alt ports), applies migrations against
 # the test database, and runs the build-tagged tests with the

@@ -235,8 +235,8 @@ func TestLoad_TLSAndTrustedProxiesEnvOverrides(t *testing.T) {
 	}
 	t.Setenv("URL_SHORTENER_TLS_CERT_FILE", certPath)
 	t.Setenv("URL_SHORTENER_TLS_KEY_FILE", keyPath)
-	// Comma-separated CIDR list -- viper's default decode hooks split
-	// strings on commas when targeting a []string field.
+	// Comma-separated CIDR list -- caarlos0/env splits comma-separated
+	// strings into []string by default.
 	t.Setenv("URL_SHORTENER_TRUSTED_PROXIES", "127.0.0.1/32,10.0.0.0/8")
 
 	cfg, err := config.Load()
