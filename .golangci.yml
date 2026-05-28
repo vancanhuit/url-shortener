@@ -102,6 +102,8 @@ linters:
       # the entire node_modules tree so vendored third-party Go files are
       # never analysed.
       - web/node_modules
+      # sqlc-generated code; linting generated files is not useful.
+      - internal/store/db
     rules:
       # Test fixtures often embed fake URLs/passwords; gosec G101 noise.
       # Tests are also free to use httptest.NewRequest / http.Get / net.Listen

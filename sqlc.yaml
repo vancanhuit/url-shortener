@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - schema: "migrations/"
+    queries: "internal/store/queries/"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "db"
+        out: "internal/store/db"
+        sql_package: "pgx/v5"
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
