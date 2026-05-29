@@ -121,6 +121,7 @@ services:
       args:
         VERSION: ${VERSION:-v0.0.0-dev}
         COMMIT: ${COMMIT:-unknown}
+        DATE: ${DATE:-1970-01-01T00:00:00Z}
     command: ["run"]
     depends_on:
       db:
@@ -169,6 +170,7 @@ services:
       args:
         VERSION: ${VERSION:-v0.0.0-dev}
         COMMIT: ${COMMIT:-unknown}
+        DATE: ${DATE:-1970-01-01T00:00:00Z}
     command: ["run"]
     depends_on:
       db:
