@@ -9,6 +9,8 @@
 //   - assets/index-<hash>.css Tailwind-processed styles
 //   - static/swagger-ui.*     vendored Swagger UI bundle
 //   - static/redoc.*          vendored Redoc bundle
+//   - swagger-ui-init.js      Swagger UI initialisation (copied from web/public/)
+//   - theme-init.js           dark/light theme initialisation (copied from web/public/)
 //
 // Re-run `just web-build` (or `npm --prefix web run build`) after
 // touching anything under `web/src/`, `web/index.html`, or
