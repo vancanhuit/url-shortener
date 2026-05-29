@@ -53,6 +53,12 @@ func NewSPA(cfg SPAConfig) *SPA {
 	}
 }
 
+// rootJSFiles are the non-hashed JS files placed at the dist root by
+// Vite (copied verbatim from web/public/). They are served with
+// no-cache so a deploy is reflected on the next navigation, matching
+// the policy on index.html.
+var rootJSFiles = []string{"swagger-ui-init.js", "theme-init.js"}
+
 // Mount registers the SPA + asset routes on r.
 func (s *SPA) Mount(r chi.Router) {
 	r.Get("/", s.Index)
@@ -66,6 +72,13 @@ func (s *SPA) Mount(r chi.Router) {
 
 	r.Get("/assets/*", assetsHandler.ServeHTTP)
 	r.Get("/static/*", staticHandler.ServeHTTP)
+
+	for _, name := range rootJSFiles {
+		r.Get("/"+name, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", indexCacheControl)
+			http.ServeFileFS(w, r, s.dist, name)
+		})
+	}
 }
 
 // Index serves the SPA shell.

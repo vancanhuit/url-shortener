@@ -25,6 +25,8 @@ func fakeDist() fstest.MapFS {
 		"assets/index-abc123.css":    &fstest.MapFile{Data: []byte("body{margin:0}")},
 		"static/swagger-ui.css":      &fstest.MapFile{Data: []byte(":root{}")},
 		"static/redoc.standalone.js": &fstest.MapFile{Data: []byte("window.Redoc = {}")},
+		"swagger-ui-init.js":         &fstest.MapFile{Data: []byte("window.ui={};")},
+		"theme-init.js":              &fstest.MapFile{Data: []byte("window.theme={};")},
 	}
 }
 
@@ -122,5 +124,26 @@ func TestSPA_UnknownAssetReturns404(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestSPA_RootJSFilesAreServedWithNoCache(t *testing.T) {
+	t.Parallel()
+	r := newSPARouter(t)
+
+	for _, path := range []string{"/swagger-ui-init.js", "/theme-init.js"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s status = %d, want 200", path, rec.Code)
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Errorf("%s Cache-Control = %q, want no-cache", path, got)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+			t.Errorf("%s Content-Type = %q, want javascript", path, ct)
+		}
 	}
 }
