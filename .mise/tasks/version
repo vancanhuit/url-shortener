@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# [MISE] description="Print the resolved version (useful for verifying the ldflags pipeline)."
+set -euo pipefail
+VERSION=$(git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev")
+go run ./cmd/url-shortener version 2>/dev/null || echo "Version (resolved): ${VERSION}"

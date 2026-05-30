@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# [MISE] description="Multi-arch build for linux/amd64 + linux/arm64. Pass any arg to push."
+#USAGE flag "-p --push" help="Push to registry after build"
+set -euo pipefail
+
+VERSION=$(git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev")
+COMMIT=$(git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown")
+DATE=$(TZ=UTC git show -s --format='%cd' --date='format-local:%Y-%m-%dT%H:%M:%SZ' HEAD 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
+
+push_flag="--output=type=image,push=false"
+if [ "${usage_push:-false}" = "true" ]; then
+    push_flag="--push"
+fi
+
+docker buildx build \
+    --platform linux/amd64,linux/arm64 \
+    --build-arg VERSION="${VERSION}" \
+    --build-arg COMMIT="${COMMIT}" \
+    --build-arg DATE="${DATE}" \
+    --sbom=true \
+    --provenance=mode=max \
+    -t "url-shortener:${VERSION}" \
+    ${push_flag} \
+    .

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# [MISE] description="Generate release notes via git-cliff (cliff.toml). Usage: mise run changelog [FROM] [TO]"
+set -euo pipefail
+
+from="${1:-}"
+to="${2:-HEAD}"
+
+if [ -z "$from" ]; then
+    from=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$to" 2>/dev/null || true)
+fi
+
+mkdir -p dist
+out=dist/CHANGELOG.md
+
+if [ -n "$from" ]; then
+    git-cliff --config cliff.toml --tag "$to" --output "$out" "$from..$to"
+else
+    git-cliff --config cliff.toml --tag "$to" --output "$out"
+fi
+
+echo "wrote $out:" >&2
+cat "$out"

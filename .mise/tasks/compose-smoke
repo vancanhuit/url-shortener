@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# [MISE] description="Smoke-check a running dev stack: operational endpoints + shorten/redirect cycle."
+set -euo pipefail
+base="http://localhost:8080"
+
+echo "== /livez =="
+curl --fail-with-body -sS "$base/livez" \
+    | tee /dev/stderr | jq -e '.status == "ok"' >/dev/null
+
+echo "== /readyz =="
+curl --fail-with-body -sS "$base/readyz" \
+    | tee /dev/stderr \
+    | jq -e '.status == "ok" and .postgres == "ok" and .redis == "ok"' >/dev/null
+
+echo "== /version =="
+curl --fail-with-body -sS "$base/version" \
+    | tee /dev/stderr | jq -e 'has("version")' >/dev/null
+
+# The HTML index references the embedded assets; a missing template
+# parse would 5xx here long before we get a chance to look at the body.
+echo "== / (web index) =="
+body=$(curl --fail-with-body -sS "$base/")
+echo "$body" | grep -qi "<title>URL Shortener</title>" \
+    || { echo "index page missing <title>URL Shortener</title>"; exit 1; }
+
+echo "== SPA hashed asset reachable =="
+asset_path=$(echo "$body" \
+    | grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' \
+    | head -1)
+test -n "$asset_path" \
+    || { echo "index page references no /assets/* bundle"; exit 1; }
+curl --fail-with-body -sS -o /dev/null "$base$asset_path"
+
+echo "== vendored docs assets =="
+for asset in swagger-ui.css swagger-ui-bundle.js swagger-ui-standalone-preset.js redoc.standalone.js; do
+    curl --fail-with-body -sS -o /dev/null "$base/static/$asset"
+done
+
+echo "== shorten -> fetch -> redirect =="
+target="https://example.com/smoke/$(date +%s)"
+code=$(curl --fail-with-body -sS -X POST "$base/api/v1/links" \
+    -H "content-type: application/json" \
+    -d "{\"target_url\":\"$target\"}" | jq -r .code)
+test -n "$code" && test "$code" != null \
+    || { echo "create returned no code"; exit 1; }
+
+curl --fail-with-body -sS "$base/api/v1/links/$code" \
+    | jq -e --arg t "$target" '.target_url == $t' >/dev/null
+
+headers=$(curl -sS -D - -o /dev/null "$base/r/$code")
+echo "$headers"
+echo "$headers" | grep -qiE "^HTTP/[0-9.]+ 302" \
+    || { echo "expected 302"; exit 1; }
+echo "$headers" | grep -qi "^location: $target" \
+    || { echo "expected Location: $target"; exit 1; }
+
+echo "ok"

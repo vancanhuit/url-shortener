@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# [MISE] description="Scan an arbitrary image reference with Trivy (HIGH/CRITICAL, --ignore-unfixed)."
+# [MISE] depends=["trivy-install"]
+#USAGE arg "<image>" help="Image reference to scan (registry tag, digest, or local daemon image)"
+set -euo pipefail
+bindir="${BIN_DIR:-$HOME/.local/bin}"
+"$bindir/trivy" image \
+    --severity HIGH,CRITICAL \
+    --ignore-unfixed \
+    --exit-code 1 \
+    --no-progress \
+    "${usage_image}"
