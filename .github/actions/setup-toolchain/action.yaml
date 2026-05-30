@@ -20,13 +20,13 @@ runs:
     # Install mise and all tools declared in mise.toml (go, node, java).
     # cache: true (the default) stores ~/.local/share/mise/installs in GitHub's
     # cache so binaries are not re-downloaded on subsequent runs.
-    - uses: jdx/mise-action@v3
+    - uses: jdx/mise-action@v4
       with:
         cache: true
 
     - name: Cache Go modules
       if: ${{ inputs.go-cache == 'true' }}
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           ~/go/pkg/mod
@@ -36,7 +36,7 @@ runs:
           go-${{ runner.os }}-
 
     - name: Cache npm packages
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.npm
         key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}

@@ -70,7 +70,7 @@ jobs:
       - uses: ./.github/actions/setup-toolchain
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
+        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           languages: ${{ matrix.language }}
           # `security-extended` adds higher-precision queries beyond
@@ -90,9 +90,9 @@ jobs:
         run: mise run web-build
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
+        uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
+        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           category: "/language:${{ matrix.language }}"
