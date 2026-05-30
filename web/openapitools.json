@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/@openapitools/openapi-generator-cli/config.schema.json",
+  "spaces": 2,
+  "generator-cli": {
+    "version": "7.22.0",
+    "generators": {
+      "typescript-fetch": {
+        "generatorName": "typescript-fetch",
+        "output": "src/lib/generated",
+        "inputSpec": "../api/openapi.yaml",
+        "additionalProperties": {
+          "supportsES6": true,
+          "typescriptThreePlus": true,
+          "modelPropertyNaming": "original",
+          "enumPropertyNaming": "original",
+          "withSeparateModelsAndApi": true,
+          "withInterfaces": true,
+          "prefixParameterInterfaces": false
+        }
+      }
+    }
+  }
+}

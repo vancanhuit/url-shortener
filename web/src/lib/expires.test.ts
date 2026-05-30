@@ -42,19 +42,19 @@ describe("resolveExpiresAt", () => {
     expect(resolveExpiresAt("5h")).toBeNull();
   });
 
-  it("returns an ISO timestamp 1h in the future for '1h'", () => {
-    expect(resolveExpiresAt("1h")).toBe("2024-01-01T01:00:00.000Z");
+  it("returns a Date 1h in the future for '1h'", () => {
+    expect(resolveExpiresAt("1h")?.toISOString()).toBe("2024-01-01T01:00:00.000Z");
   });
 
-  it("returns an ISO timestamp 1d in the future for '1d'", () => {
-    expect(resolveExpiresAt("1d")).toBe("2024-01-02T00:00:00.000Z");
+  it("returns a Date 1d in the future for '1d'", () => {
+    expect(resolveExpiresAt("1d")?.toISOString()).toBe("2024-01-02T00:00:00.000Z");
   });
 
-  it("returns an ISO timestamp 7d in the future for '7d'", () => {
-    expect(resolveExpiresAt("7d")).toBe("2024-01-08T00:00:00.000Z");
+  it("returns a Date 7d in the future for '7d'", () => {
+    expect(resolveExpiresAt("7d")?.toISOString()).toBe("2024-01-08T00:00:00.000Z");
   });
 
-  it("returns an ISO timestamp 30d in the future for '30d'", () => {
-    expect(resolveExpiresAt("30d")).toBe("2024-01-31T00:00:00.000Z");
+  it("returns a Date 30d in the future for '30d'", () => {
+    expect(resolveExpiresAt("30d")?.toISOString()).toBe("2024-01-31T00:00:00.000Z");
   });
 });

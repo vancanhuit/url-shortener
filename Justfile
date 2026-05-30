@@ -81,6 +81,14 @@ build: web-build
 web-install:
     npm ci
 
+# Regenerate web/src/lib/generated/ from api/openapi.yaml using
+# openapi-generator-cli. Re-run after editing api/openapi.yaml.
+# Requires Java on PATH (the CLI wraps a JAR).
+[group("dev")]
+[working-directory("web")]
+web-generate: web-install
+    npm run generate
+
 # Build the Vite + Svelte SPA into web/dist/. The Go binary embeds
 # `web/dist/` via `//go:embed` in web/web.go, so re-run this after
 # touching anything under web/src/, web/public/, or web/index.html.

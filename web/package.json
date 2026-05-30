@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Vite + Svelte + Tailwind v4 SPA for the url-shortener web UI.",
   "scripts": {
+    "generate": "openapi-generator-cli generate",
     "dev": "vite",
     "vendor:docs": "node scripts/vendor-docs-assets.mjs",
     "prebuild": "npm run vendor:docs",
@@ -19,6 +20,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.34.0",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.3.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -36,8 +38,8 @@
     "swagger-ui-dist": "^5.32.6",
     "tailwindcss": "^4.2.4",
     "typescript": "^6.0.3",
-    "vite": "^8.0.14",
     "typescript-eslint": "^8.33.1",
+    "vite": "^8.0.14",
     "vitest": "^4.1.7"
   }
 }

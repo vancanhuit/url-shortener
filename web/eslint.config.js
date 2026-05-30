@@ -41,6 +41,6 @@ export default ts.config(
     },
   },
   {
-    ignores: ["dist/", "node_modules/", "public/static/"],
+    ignores: ["dist/", "node_modules/", "public/static/", "src/lib/generated/"],
   }
 );

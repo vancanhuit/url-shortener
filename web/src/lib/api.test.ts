@@ -59,29 +59,29 @@ describe("listLinks", () => {
   it("calls /api/v1/links with no query string when params are empty", async () => {
     respondWith(200, { items: [], next_cursor: null });
     await listLinks({});
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links", expect.any(Object));
   });
 
   it("appends the before param when provided", async () => {
     respondWith(200, { items: [], next_cursor: null });
     await listLinks({ before: 42 });
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links?before=42");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links?before=42", expect.any(Object));
   });
 
   it("appends the limit param when provided", async () => {
     respondWith(200, { items: [], next_cursor: null });
     await listLinks({ limit: 10 });
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links?limit=10");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links?limit=10", expect.any(Object));
   });
 
   it("appends both params when both are provided", async () => {
     respondWith(200, { items: [], next_cursor: null });
     await listLinks({ limit: 10, before: 5 });
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links?limit=10&before=5");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/links?limit=10&before=5", expect.any(Object));
   });
 
   it("throws an ApiError on a non-2xx response", async () => {
-    respondWith(500, { code: "internal_error", message: "server error" });
+    respondWith(500, { code: "internal_error", error: "server error" });
     await expect(listLinks({})).rejects.toMatchObject({ status: 500, code: "internal_error" });
   });
 });

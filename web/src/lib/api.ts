@@ -1,35 +1,39 @@
-// Thin fetch wrappers around the public JSON API. All calls are
-// same-origin: the SPA is served by the Go binary in production, and
-// in dev `vite.config.ts` proxies `/api/*` to localhost:8080.
+// Generated TypeScript client + application-level wrappers.
 //
-// Types here mirror `internal/handlers` (LinkResponse, ErrorResponse).
-// Keep them in sync with `api/openapi.yaml`, which is the contract
-// of record.
+// Types are auto-generated from `api/openapi.yaml` by openapi-generator-cli
+// (see `web/openapitools.json` and `just web-generate`). Do not edit files
+// under `./generated/` by hand.
+//
+// This module wraps the generated `LinksApi` and `OperationalApi` to:
+//  - use same-origin relative paths (basePath: "")
+//  - translate `ResponseError` into the app-level `ApiError` shape
+//  - add the `created` flag to `createLink` (201 vs 200 dedup)
+//  - treat 404 as success for `deleteLink` (idempotent delete)
 
-export interface Link {
-  code: string;
-  short_url: string;
-  target_url: string;
-  created_at: string;
-  expires_at?: string | null;
-  click_count: number;
-}
+import {
+  Configuration,
+  LinksApi,
+  OperationalApi,
+  ResponseError,
+  type LinkRequest,
+  type LinkResponse,
+  type ListResponse,
+  type VersionResponse,
+} from "./generated";
 
-export interface CreateLinkInput {
-  target_url: string;
-  code?: string;
-  expires_at?: string | null;
-}
+// Re-export generated types under the names callers expect.
+export type { LinkResponse as Link } from "./generated";
+export type { LinkRequest as CreateLinkInput } from "./generated";
+export type { ListResponse as ListLinksResponse } from "./generated";
+export type { VersionResponse as VersionInfo } from "./generated";
 
-export interface ListLinksParams {
-  limit?: number;
-  before?: number;
-}
-
-export interface ListLinksResponse {
-  items: Link[];
-  next_cursor: number | null;
-}
+// Singleton API instances configured for same-origin relative paths.
+// basePath: "" makes all requests root-relative (/api/v1/links etc.),
+// which works both in production (Go binary serves SPA + API) and in
+// dev (Vite proxies /api/* to localhost:8080).
+const _cfg = new Configuration({ basePath: "" });
+const _linksApi = new LinksApi(_cfg);
+const _opApi = new OperationalApi(_cfg);
 
 export interface ApiError {
   status: number;
@@ -38,47 +42,48 @@ export interface ApiError {
 }
 
 export interface CreateLinkResult {
-  link: Link;
+  link: LinkResponse;
   /** True when a fresh row was inserted (server returned 201); false
    *  when an existing permanent row was reused for dedup (200). */
   created: boolean;
 }
 
-/**
- * Build an `ApiError` from a non-2xx response. Falls back to a generic
- * message if the body isn't a parseable error envelope.
- */
-async function asApiError(resp: Response): Promise<ApiError> {
-  let code = "unknown_error";
-  let message = `request failed with ${resp.status}`;
-  try {
-    const body = (await resp.json()) as unknown;
-    if (body && typeof body === "object") {
-      const env = body as Partial<{ code: unknown; message: unknown }>;
-      if (typeof env.code === "string") code = env.code;
-      if (typeof env.message === "string") message = env.message;
+/** Translate a `ResponseError` thrown by the generated client into an `ApiError`. */
+async function toApiError(err: unknown): Promise<ApiError> {
+  if (err instanceof ResponseError) {
+    let code = "unknown_error";
+    let message = `request failed with ${err.response.status}`;
+    try {
+      const body = (await err.response.json()) as unknown;
+      if (body && typeof body === "object") {
+        const env = body as Partial<{ code: unknown; error: unknown }>;
+        if (typeof env.code === "string") code = env.code;
+        if (typeof env.error === "string") message = env.error;
+      }
+    } catch {
+      // Non-JSON body or empty — keep defaults.
     }
-  } catch {
-    // Non-JSON body or empty -- keep defaults.
+    return { status: err.response.status, code, message };
   }
-  return { status: resp.status, code, message };
+  return { status: 0, code: "unknown_error", message: String(err) };
 }
 
-export async function createLink(input: CreateLinkInput): Promise<CreateLinkResult> {
-  const resp = await fetch("/api/v1/links", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!resp.ok) throw await asApiError(resp);
-  const link = (await resp.json()) as Link;
-  return { link, created: resp.status === 201 };
+export async function createLink(input: LinkRequest): Promise<CreateLinkResult> {
+  try {
+    const raw = await _linksApi.createLinkRaw({ linkRequest: input });
+    const link = await raw.value();
+    return { link, created: raw.raw.status === 201 };
+  } catch (err) {
+    throw await toApiError(err);
+  }
 }
 
-export async function getLink(code: string): Promise<Link> {
-  const resp = await fetch(`/api/v1/links/${encodeURIComponent(code)}`);
-  if (!resp.ok) throw await asApiError(resp);
-  return (await resp.json()) as Link;
+export async function getLink(code: string): Promise<LinkResponse> {
+  try {
+    return await _linksApi.getLink({ code });
+  } catch (err) {
+    throw await toApiError(err);
+  }
 }
 
 /**
@@ -87,33 +92,33 @@ export async function getLink(code: string): Promise<Link> {
  * doesn't show an error if a poll races a delete from another tab.
  */
 export async function deleteLink(code: string): Promise<void> {
-  const resp = await fetch(`/api/v1/links/${encodeURIComponent(code)}`, {
-    method: "DELETE",
-  });
-  if (resp.ok || resp.status === 404) return;
-  throw await asApiError(resp);
+  try {
+    await _linksApi.deleteLink({ code });
+  } catch (err) {
+    if (err instanceof ResponseError && err.response.status === 404) return;
+    throw await toApiError(err);
+  }
 }
 
-export async function listLinks(params: ListLinksParams = {}): Promise<ListLinksResponse> {
-  const qs = new URLSearchParams();
-  if (params.limit) qs.set("limit", String(params.limit));
-  if (params.before) qs.set("before", String(params.before));
-  const url = qs.size > 0 ? `/api/v1/links?${qs.toString()}` : "/api/v1/links";
-  const resp = await fetch(url);
-  if (!resp.ok) throw await asApiError(resp);
-  return (await resp.json()) as ListLinksResponse;
+export interface ListLinksParams {
+  limit?: number;
+  before?: number;
 }
 
-export interface VersionInfo {
-  version: string;
-  commit: string;
-  date: string;
+export async function listLinks(params: ListLinksParams = {}): Promise<ListResponse> {
+  try {
+    return await _linksApi.listLinks(params);
+  } catch (err) {
+    throw await toApiError(err);
+  }
 }
 
-export async function getVersion(): Promise<VersionInfo> {
-  const resp = await fetch("/version");
-  if (!resp.ok) throw await asApiError(resp);
-  return (await resp.json()) as VersionInfo;
+export async function getVersion(): Promise<VersionResponse> {
+  try {
+    return await _opApi.version();
+  } catch (err) {
+    throw await toApiError(err);
+  }
 }
 
 /**

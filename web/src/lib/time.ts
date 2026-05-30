@@ -6,9 +6,9 @@
  * @returns A short label like "expired", "<1m left", "5m left",
  *          "3h left", "12d left", or "" for "never".
  */
-export function humanExpiry(expiresAt: string | null | undefined): string {
+export function humanExpiry(expiresAt: Date | string | null | undefined): string {
   if (!expiresAt) return "";
-  const target = Date.parse(expiresAt);
+  const target = expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
   if (Number.isNaN(target)) return "";
   const ms = target - Date.now();
   if (ms <= 0) return "expired";
