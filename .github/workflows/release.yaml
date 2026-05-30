@@ -184,18 +184,27 @@ jobs:
       - name: Build release binaries
         run: mise run release-binaries
 
-      # Generate release-notes markdown for the (prev_tag, this_tag]
-      # range using git-cliff (cliff.toml). `--current` auto-resolves
-      # the previous semver tag from git's tag graph, so we don't need
-      # the prior `git describe` shuffle. Output is written to
-      # dist/CHANGELOG.md via the action's $OUTPUT env contract.
+      # Generate release notes for the (prev_tag, this_tag] range using
+      # git-cliff (cliff.toml). git-cliff is managed by mise and installed
+      # by setup-toolchain above.
+      #
+      # We resolve the previous tag with `git tag --sort=version:refname`
+      # (git's built-in semver sort, which handles v0.10.0 > v0.9.0
+      # correctly) rather than relying on git-cliff's `--latest` flag,
+      # which uses lexicographic tag ordering and would pick v0.9.0 as
+      # "latest" instead of v0.10.0.
+      #
+      # git-cliff also resolves `previous.version` (used for the "Full
+      # Changelog" footer link) by lexicographic sort, so we patch that
+      # link after generation using the correctly-sorted PREV_TAG.
       - name: Generate release notes
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
-        with:
-          config: cliff.toml
-          args: --current
-        env:
-          OUTPUT: dist/CHANGELOG.md
+        run: |
+          CURRENT_TAG="${{ github.ref_name }}"
+          PREV_TAG=$(git tag --sort=version:refname \
+            | grep -B1 "^${CURRENT_TAG}$" \
+            | head -1)
+          git-cliff "${PREV_TAG}..${CURRENT_TAG}" --output dist/CHANGELOG.md
+          sed -i "s|^\*\*Full Changelog\*\*:.*|**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${CURRENT_TAG}|" dist/CHANGELOG.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
