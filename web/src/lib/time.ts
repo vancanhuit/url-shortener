@@ -1,7 +1,5 @@
 // Coarse-grained "time-until-X" formatter for the recent-list expiry
-// badge. Mirrors the Go-side humanExpiry helper that previously lived
-// in web/web.go; kept identical so the UX doesn't drift across the
-// SPA refactor.
+// badge.
 
 /**
  * @param expiresAt ISO-8601 timestamp, null, or undefined for "never".

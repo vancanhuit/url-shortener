@@ -106,7 +106,7 @@ jobs:
 
   openapi:
     name: openapi (spectral)
-    # Lint the OpenAPI 3.1 document at api/openapi.yaml using Spectral.
+    # Lint the OpenAPI 3.0 document at api/openapi.yaml using Spectral.
     # Spectral lives in package.json's devDependencies and is invoked
     # via `just lint-openapi`, which calls the `lint:openapi` npm
     # script with the project ruleset (.spectral.yaml). A drift

@@ -1,8 +1,7 @@
-// Mirrors the limited set of expiry presets the Go HTML route used to
-// accept. Kept on the client because the JSON API takes an absolute
-// `expires_at` ISO timestamp -- the SPA computes the timestamp from
-// the user's preset choice and submits that. Anything outside this
-// set is treated as "never" by the form's <select>.
+// Expiry presets exposed by the form's <select>. Kept on the client
+// because the JSON API takes an absolute `expires_at` ISO timestamp --
+// the SPA computes the timestamp from the user's preset choice and
+// submits that. Anything outside this set is treated as "never".
 
 export interface ExpiresPreset {
   value: string;

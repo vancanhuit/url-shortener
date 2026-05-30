@@ -14,8 +14,7 @@
   let pending = $state(false);
 
   // Reusable Tailwind class string for inputs/selects so the focus
-  // ring + colour scheme doesn't drift between fields. The Go-side
-  // template used to pre-compute this; we just keep it as a constant.
+  // ring + colour scheme doesn't drift between fields.
   const inputClass =
     "mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/40 transition-colors";
 

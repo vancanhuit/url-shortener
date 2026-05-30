@@ -280,7 +280,7 @@ lint: lint-install web-build tidy
 fmt: lint-install
     {{ quote(BIN_DIR / "golangci-lint") }} fmt
 
-# Lint the OpenAPI 3.1 document at api/openapi.yaml with Spectral.
+# Lint the OpenAPI 3.0 document at api/openapi.yaml with Spectral.
 # Spectral is installed as an npm devDependency (see package.json),
 # so the recipe depends on `init` to make sure node_modules/.bin is
 # populated. Configuration lives at .spectral.yaml at the repo root;
