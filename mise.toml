@@ -1,0 +1,101 @@
+[tools]
+go = "1.26.3"
+node = "24.16.0"
+# JDK for @openapitools/openapi-generator-cli (used by `mise run web-generate`).
+java = "temurin-21"
+
+[env]
+# Pinned versions for self-installed binaries. Scripts use these as defaults
+# and fall back to the literal value when the env var is not set externally.
+GOLANGCI_LINT_VERSION = "2.11.4"
+TRIVY_VERSION = "0.70.0"
+
+[tasks.init]
+description = "One-time bootstrap: install Node devDependencies (husky + commitlint)."
+run = "npm ci"
+
+[tasks.test]
+description = "Run all unit tests with verbose output and per-package coverage."
+run = "go test -race -v -cover ./..."
+
+[tasks.tidy]
+description = "Tidy go.mod / go.sum."
+run = "go mod tidy"
+
+[tasks.store-gen]
+description = "Regenerate sqlc-typed query code from internal/store/queries/*.sql."
+run = "go tool sqlc generate"
+
+[tasks.api-gen]
+description = "Regenerate oapi-codegen typed server code from api/openapi.yaml."
+run = "go tool oapi-codegen -config api/cfg.yaml api/openapi.yaml"
+
+[tasks.lint-openapi]
+description = "Lint the OpenAPI spec with Spectral. Requires `mise run init` first."
+depends = ["init"]
+run = "npm run lint:openapi"
+
+[tasks.commitlint-last]
+description = "Lint just the most recent commit message."
+run = "npx --no -- commitlint --from=HEAD~1 --to=HEAD"
+
+[tasks.down]
+description = "Tear down the dev stack and remove volumes."
+run = "docker compose --profile=dev down $@"
+
+[tasks.down-tls]
+description = "Tear down the TLS stack and remove volumes."
+run = "docker compose --profile=tls down $@"
+
+[tasks.web-install]
+description = "Install npm deps for the web SPA toolchain (idempotent)."
+dir = "web"
+run = "npm ci"
+
+[tasks.web-generate]
+description = "Regenerate web/src/lib/generated/ from api/openapi.yaml. Requires Java."
+dir = "web"
+depends = ["web-install"]
+run = "npm run generate"
+
+[tasks.web-build]
+description = "Build the Vite + Svelte SPA into web/dist/."
+dir = "web"
+depends = ["web-install"]
+run = "npm run build"
+
+[tasks.web-dev]
+description = "Vite dev server with HMR. Run `mise run up` in another terminal first."
+dir = "web"
+depends = ["web-install"]
+run = "npm run dev"
+
+[tasks.web-check]
+description = "Run svelte-check + tsc against the SPA."
+dir = "web"
+depends = ["web-install"]
+run = "npm run check"
+
+[tasks.web-fmt]
+description = "Format the web SPA with Prettier (writes files in-place)."
+dir = "web"
+depends = ["web-install"]
+run = "npm run fmt"
+
+[tasks.web-fmt-check]
+description = "Check web SPA formatting with Prettier (fails on diff; used by CI)."
+dir = "web"
+depends = ["web-install"]
+run = "npm run fmt:check"
+
+[tasks.web-lint]
+description = "Lint the web SPA with ESLint."
+dir = "web"
+depends = ["web-install"]
+run = "npm run lint:js"
+
+[tasks.web-test]
+description = "Run the web SPA unit tests."
+dir = "web"
+depends = ["web-install"]
+run = "npm run test"
