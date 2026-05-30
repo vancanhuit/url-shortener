@@ -41,8 +41,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: 1.26.3
-  NODE_VERSION: 24.16.0
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   # Opt every JS-based action into the Node 24 runtime ahead of the
@@ -174,20 +172,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # `just release-binaries` depends on `just web-build`, which runs
-      # `npm ci` in web/tailwind/. Same composite as ci.yaml.
+      # `mise run release-binaries` depends on `mise run web-build`, which runs
+      # `npm ci` in web/. Same composite as ci.yaml.
       - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
 
-      # The Justfile reads VERSION from `git describe --tags`, which on a
+      # The task reads VERSION from `git describe --tags`, which on a
       # tag push reports e.g. `v1.2.3` verbatim. The release-binaries
-      # recipe emits url-shortener_${VERSION}_${os}_${arch}.tar.gz
+      # task emits url-shortener_${VERSION}_${os}_${arch}.tar.gz
       # under ./dist, plus per-archive .tar.gz.sha256 files and an
       # aggregate SHA256SUMS.
       - name: Build release binaries
-        run: just release-binaries
+        run: mise run release-binaries
 
       # Generate release-notes markdown for the (prev_tag, this_tag]
       # range using git-cliff (cliff.toml). `--current` auto-resolves
