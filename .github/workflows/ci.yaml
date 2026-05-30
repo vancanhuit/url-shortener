@@ -14,12 +14,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Toolchain versions are pinned in mise.toml and installed via jdx/mise-action.
-# GOLANGCI_LINT_VERSION and TRIVY_VERSION are also set there; the mise tasks
-# pick them up as environment variables when running lint and trivy-scan.
+# Tool versions and environment variables for mise tasks are declared in
+# mise.toml and injected automatically when `jdx/mise-action` runs.
+# Only GitHub Actions-specific variables are set here.
 env:
-  GOLANGCI_LINT_VERSION: 2.11.4
-  TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io
   # Opt every JS-based action into the Node 24 runtime ahead of the
   # June 2026 deadline.

@@ -44,11 +44,10 @@ concurrency:
   group: nightly-scan
   cancel-in-progress: false
 
+# Tool versions (e.g. TRIVY_VERSION) are declared in mise.toml [env] and
+# injected automatically when jdx/mise-action runs. Only GitHub Actions-specific
+# variables are set here.
 env:
-  # Pin trivy from the workflow so a single bump on `main` rolls out
-  # to every scheduled run, and keep it in sync with TRIVY_VERSION
-  # in mise.toml (the task self-installs at this version).
-  TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
