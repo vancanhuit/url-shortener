@@ -22,8 +22,8 @@ export const EXPIRES_PRESETS: readonly ExpiresPreset[] = [
  * Resolve a preset value to an ISO-8601 timestamp suitable for the
  * JSON API's `expires_at`, or null for "never".
  */
-export function resolveExpiresAt(value: string): string | null {
+export function resolveExpiresAt(value: string): Date | null {
   const preset = EXPIRES_PRESETS.find((p) => p.value === value);
   if (!preset || preset.ms === null) return null;
-  return new Date(Date.now() + preset.ms).toISOString();
+  return new Date(Date.now() + preset.ms);
 }
