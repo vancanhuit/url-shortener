@@ -78,8 +78,8 @@ jobs:
         run: mise run build
       - name: mise run test
         run: mise run test
-      # `mise run lint` self-installs golangci-lint at the version pinned in
-      # mise.toml (GOLANGCI_LINT_VERSION env var).
+      # `mise run lint` runs golangci-lint, which is managed by mise
+      # and available on PATH.
       - name: mise run lint
         run: mise run lint
 
@@ -143,6 +143,8 @@ jobs:
       # (no `git describe` needed here).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/setup-toolchain
+        with:
+          npm-cache: "false"
       # `mise run govulncheck` self-installs govulncheck@latest into $GOPATH/bin
       # and runs it with --build-tags=integration so the entire codebase
       # (including //go:build integration tests) is analysed for
@@ -297,19 +299,8 @@ jobs:
       - uses: jdx/mise-action@v4
         with:
           cache: true
-      # mkcert is preinstalled on `ubuntu-latest` (`ubuntu-24.04`)
-      # GitHub-hosted runners as of late 2025; this step is a defensive
-      # fallback so a future runner-image change that drops it doesn't
-      # silently break the smoke test. The apt path also gives us
-      # libnss3-tools, which mkcert calls when populating its CAROOT
-      # (we never run `mkcert -install`, but the dependency is tiny).
-      - name: install mkcert (if missing)
-        run: |
-          if ! command -v mkcert >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y --no-install-recommends mkcert libnss3-tools
-          fi
-          mkcert -version
+      # mkcert is now managed by mise (pinned in mise.toml) and installed
+      # by mise-action above — no apt fallback needed.
 
       - name: mise run tls-smoke
         run: mise run tls-smoke

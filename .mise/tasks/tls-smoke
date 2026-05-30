@@ -2,10 +2,6 @@
 # [MISE] description="Smoke-test the TLS compose profile with an isolated mkcert root CA."
 set -euo pipefail
 
-if ! command -v mkcert >/dev/null 2>&1; then
-    echo 'mkcert not found on PATH; see `mise run dev-certs` for install instructions.' >&2
-    exit 1
-fi
 if ! command -v openssl >/dev/null 2>&1; then
     echo 'openssl not found on PATH; required to verify cert hot-reload.' >&2
     exit 1

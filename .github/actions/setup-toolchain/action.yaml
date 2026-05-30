@@ -13,6 +13,12 @@ inputs:
       (e.g. commitlint, openapi, web — jobs that never invoke the Go toolchain).
     required: false
     default: "true"
+  npm-cache:
+    description: >-
+      Whether to cache the npm download cache (~/.npm) between runs.
+      Set to "false" for jobs that never invoke Node/npm (e.g. govulncheck).
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -36,6 +42,7 @@ runs:
           go-${{ runner.os }}-
 
     - name: Cache npm packages
+      if: ${{ inputs.npm-cache == 'true' }}
       uses: actions/cache@v5
       with:
         path: ~/.npm
