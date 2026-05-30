@@ -14,24 +14,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Pinned toolchain versions. Bump these in one place; jobs reference them
-# via ${{ env.GO_VERSION }} etc.
-#
-# GOLANGCI_LINT_VERSION and TRIVY_VERSION must stay in sync with the
-# constants of the same names in the Justfile, since `just lint` and
-# `just trivy-scan` self-install those binaries at the pinned versions.
-# The workflow exports them so the Justfile picks them up via the
-# matching shell variables when set.
+# Toolchain versions are pinned in mise.toml and installed via jdx/mise-action.
+# GOLANGCI_LINT_VERSION and TRIVY_VERSION are also set there; the mise tasks
+# pick them up as environment variables when running lint and trivy-scan.
 env:
-  GO_VERSION: 1.26.3
-  NODE_VERSION: 24.16.0
   GOLANGCI_LINT_VERSION: 2.11.4
   TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io
   # Opt every JS-based action into the Node 24 runtime ahead of the
-  # June 2026 deadline. Some third-party actions we depend on (e.g.
-  # extractions/setup-just) haven't cut a Node 24 release yet; this
-  # flag lets us run them on the newer runtime today without waiting.
+  # June 2026 deadline.
   # See: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -53,24 +44,20 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # commitlint runs `just init`, which `npm ci`s the root toolchain
-      # (husky + @commitlint/*). Point the npm cache at the root lockfile
-      # rather than the SPA one, and skip the Go module cache since
-      # this job never invokes the Go toolchain.
+      # commitlint runs `mise run init`, which `npm ci`s the root toolchain
+      # (husky + @commitlint/*). Skip the Go module cache since this job
+      # never invokes the Go toolchain.
       - uses: ./.github/actions/setup-toolchain
         with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
           go-cache: "false"
-          node-cache-dependency-path: package-lock.json
-      - run: just init
+      - run: mise run init
       # The PR title becomes the squash-merge commit message on `main`, so
       # that's the message that has to be conventional. Per-commit hygiene
       # is enforced locally by the husky `commit-msg` hook.
       - name: Validate PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: just commitlint-msg "$PR_TITLE"
+        run: mise run commitlint-msg "$PR_TITLE"
 
   go:
     name: go (build / test / lint)
@@ -79,36 +66,30 @@ jobs:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
-      # fetch-depth: 0 so `just build` -> `git describe` can resolve the
+      # fetch-depth: 0 so `mise run build` -> `git describe` can resolve the
       # version string against the most recent tag, producing meaningful
       # `v1.2.3-N-gSHA` ldflags on PR/main builds instead of the bare SHA.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-      # `just build` depends on `web-build`, which `npm ci`s the
+      # `mise run build` depends on `web-build`, which `npm ci`s the
       # Vite + Svelte SPA toolchain in web/ and emits .gitignore'd
       # build artifacts under web/dist/ that the Go binary embeds.
-      # The composite caches Go modules and npm, keyed on
-      # web/package-lock.json by default.
       - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
-      - name: just build
-        run: just build
-      - name: just test
-        run: just test
-      # `just lint` self-installs golangci-lint at the version pinned in the
-      # Justfile (GOLANGCI_LINT_VERSION). The workflow-level env var of the
-      # same name above documents the expected pin.
-      - name: just lint
-        run: just lint
+      - name: mise run build
+        run: mise run build
+      - name: mise run test
+        run: mise run test
+      # `mise run lint` self-installs golangci-lint at the version pinned in
+      # mise.toml (GOLANGCI_LINT_VERSION env var).
+      - name: mise run lint
+        run: mise run lint
 
   openapi:
     name: openapi (spectral)
     # Lint the OpenAPI 3.0 document at api/openapi.yaml using Spectral.
     # Spectral lives in package.json's devDependencies and is invoked
-    # via `just lint-openapi`, which calls the `lint:openapi` npm
+    # via `mise run lint-openapi`, which calls the `lint:openapi` npm
     # script with the project ruleset (.spectral.yaml). A drift
     # between the served spec and the code is caught by the Go unit
     # + integration tests in the `go` / `go-integration` jobs; this
@@ -120,22 +101,17 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # Spectral is a Node tool with no Go dependency; skip the Go
-      # module cache to keep this job's setup fast. The npm cache is
-      # keyed on the root package-lock.json (where @stoplight/spectral-cli
-      # lives) by the composite default.
+      # module cache to keep this job's setup fast.
       - uses: ./.github/actions/setup-toolchain
         with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
           go-cache: "false"
-          node-cache-dependency-path: package-lock.json
-      - name: just lint-openapi
-        run: just lint-openapi
+      - name: mise run lint-openapi
+        run: mise run lint-openapi
 
   web:
     name: web (svelte-check)
     # Type-check + Svelte-check the SPA. The `go` job already runs the
-    # Vite production build via `just build` -> `web-build`, but that
+    # Vite production build via `mise run build` -> `web-build`, but that
     # path tolerates type errors (Svelte's compiler skips strict
     # checks). svelte-check + tsc are the strict gate; we run them in
     # their own job so the diagnostic output is easy to find.
@@ -148,17 +124,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/setup-toolchain
         with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
           go-cache: "false"
-      - name: just web-fmt-check
-        run: just web-fmt-check
-      - name: just web-lint
-        run: just web-lint
-      - name: just web-test
-        run: just web-test
-      - name: just web-check
-        run: just web-check
+      - name: mise run web-fmt-check
+        run: mise run web-fmt-check
+      - name: mise run web-lint
+        run: mise run web-lint
+      - name: mise run web-test
+        run: mise run web-test
+      - name: mise run web-check
+        run: mise run web-check
 
   vuln:
     name: govulncheck
@@ -170,19 +144,13 @@ jobs:
       # Vuln scanning works on source, so a shallow checkout is fine
       # (no `git describe` needed here).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # Reuse the project-wide toolchain composite. govulncheck doesn't
-      # need Node, but the composite always wires it up; the few extra
-      # seconds of setup-node aren't worth a special-case input.
       - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
-      # `just govulncheck` self-installs govulncheck@latest into $GOPATH/bin
+      # `mise run govulncheck` self-installs govulncheck@latest into $GOPATH/bin
       # and runs it with --build-tags=integration so the entire codebase
       # (including //go:build integration tests) is analysed for
       # reachable CVEs against the live https://pkg.go.dev/vuln database.
-      - name: just govulncheck
-        run: just govulncheck
+      - name: mise run govulncheck
+        run: mise run govulncheck
 
   trivy:
     name: trivy (image scan)
@@ -196,24 +164,23 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # `just trivy-image` calls `just docker-build` (the Dockerfile's
-      # own builder stages handle Go + npm) and `just trivy-scan`
+      # `mise run trivy-image` calls `mise run docker-build` (the Dockerfile's
+      # own builder stages handle Go + npm) and `mise run trivy-install`
       # (self-installs trivy into $HOME/.local/bin via BIN_DIR). The
-      # host only needs Docker (preinstalled) and just -- no Go or
-      # Node toolchain on the runner itself.
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
-      # Build the host-arch image and scan it with Trivy. The recipe
-      # installs trivy at the version pinned in the Justfile
-      # (TRIVY_VERSION) into $HOME/.local/bin -- the same self-install
-      # pattern used for golangci-lint -- so we avoid the
-      # aquasecurity/trivy-action third-party action that was
-      # compromised in the March-2026 supply-chain incident.
+      # host only needs Docker (preinstalled) and mise.
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
+      # Build the host-arch image and scan it with Trivy. The task
+      # installs trivy at the version pinned in mise.toml (TRIVY_VERSION)
+      # into $HOME/.local/bin -- we avoid the aquasecurity/trivy-action
+      # third-party action that was compromised in the March-2026
+      # supply-chain incident.
       #
-      # The recipe gates on HIGH/CRITICAL severities and passes
-      # --ignore-unfixed; bump the gate (or add a TRIVY_SEVERITY
-      # override here) when the policy changes.
-      - name: just trivy-image
-        run: just trivy-image
+      # The task gates on HIGH/CRITICAL severities and passes
+      # --ignore-unfixed; bump the gate when the policy changes.
+      - name: mise run trivy-image
+        run: mise run trivy-image
 
   go-integration:
     name: go (integration)
@@ -226,20 +193,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-      # Same toolchain setup as the `go` job: `just test-integration`
+      # Same toolchain setup as the `go` job: `mise run test-integration`
       # depends on `build`, which depends on `web-build` (npm ci).
       - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
-      # `just test-integration` brings up the `test`-profile infra
+      # `mise run test-integration` brings up the `test`-profile infra
       # (db-test on 5433 + redis-test on 6380), builds the binary, applies
       # migrations against the test DB, and runs the build-tagged tests --
-      # all in one recipe so local dev and CI follow the same path. The
-      # connection URLs are hardcoded inside the recipe to match
-      # compose.yaml; no per-job env overrides are needed here.
-      - name: just test-integration
-        run: just test-integration
+      # all in one task so local dev and CI follow the same path.
+      - name: mise run test-integration
+        run: mise run test-integration
       - name: tear down test infra
         if: always()
         run: docker compose --profile=test down -v
@@ -278,10 +240,12 @@ jobs:
       # runner-image changes that flip the default back.
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
-      # The smoke-check script is encapsulated in a Justfile recipe
-      # (`just compose-smoke`) so dev iteration doesn't need a CI
-      # round-trip; setup-just installs the binary used to run it.
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      # The smoke-check script is encapsulated in a mise task
+      # (`mise run compose-smoke`) so dev iteration doesn't need a CI
+      # round-trip.
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
 
       # `--wait` blocks until each service's healthcheck reports
       # healthy. The server's healthcheck invokes the binary's own
@@ -292,12 +256,12 @@ jobs:
       - name: docker compose --profile=dev up --wait
         run: docker compose --profile=dev up --wait --detach
 
-      # The recipe targets http://localhost:8080 by default, which is
-      # the dev-profile published port. See Justfile::compose-smoke for
+      # The task targets http://localhost:8080 by default, which is
+      # the dev-profile published port. See .mise/tasks/compose-smoke for
       # the actual checks (operational endpoints, embedded static
       # assets, full shorten -> fetch -> redirect cycle).
-      - name: just compose-smoke
-        run: just compose-smoke
+      - name: mise run compose-smoke
+        run: mise run compose-smoke
 
       # Always: dump server logs so a failure has its evidence in the
       # job log without having to re-run with debug. `--no-color`
@@ -320,10 +284,10 @@ jobs:
     # the cfg.TLSCertFile branch of server.Serve in the same image
     # users actually deploy.
     #
-    # The recipe (`just tls-smoke`) handles everything -- mkcert
+    # The task (`mise run tls-smoke`) handles everything -- mkcert
     # CAROOT in a tempdir (no host-trust install), compose lifecycle
     # via trap, and a negative check that omitting --cacert fails
-    # TLS verification. See Justfile::tls-smoke for details.
+    # TLS verification. See .mise/tasks/tls-smoke for details.
     needs: go
     runs-on: ubuntu-latest
     permissions:
@@ -334,8 +298,9 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
-
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
       # mkcert is preinstalled on `ubuntu-latest` (`ubuntu-24.04`)
       # GitHub-hosted runners as of late 2025; this step is a defensive
       # fallback so a future runner-image change that drops it doesn't
@@ -350,11 +315,11 @@ jobs:
           fi
           mkcert -version
 
-      - name: just tls-smoke
-        run: just tls-smoke
+      - name: mise run tls-smoke
+        run: mise run tls-smoke
 
       # Always: dump server-tls logs so a failure has its evidence in
-      # the job log. The recipe's trap already runs `down -v`, so by
+      # the job log. The task's trap already runs `down -v`, so by
       # this point the container is gone -- but `logs` still works
       # against stopped containers until compose's network is removed,
       # which the trap also does. Use `|| true` so log retrieval failure
@@ -389,12 +354,9 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
 
-      - name: just release-binaries
-        run: just release-binaries
+      - name: mise run release-binaries
+        run: mise run release-binaries
 
       # Pick a name + retention that reflects the trigger so PR and main
       # artifacts don't collide and main builds stick around long enough
