@@ -166,7 +166,7 @@ jobs:
       # own builder stages handle Go + npm) and `mise run trivy-install`
       # (self-installs trivy into $HOME/.local/bin via BIN_DIR). The
       # host only needs Docker (preinstalled) and mise.
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v4
         with:
           cache: true
       # Build the host-arch image and scan it with Trivy. The task
@@ -241,7 +241,7 @@ jobs:
       # The smoke-check script is encapsulated in a mise task
       # (`mise run compose-smoke`) so dev iteration doesn't need a CI
       # round-trip.
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v4
         with:
           cache: true
 
@@ -296,7 +296,7 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v4
         with:
           cache: true
       # mkcert is preinstalled on `ubuntu-latest` (`ubuntu-24.04`)

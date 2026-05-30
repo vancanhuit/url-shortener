@@ -78,7 +78,7 @@ jobs:
       # BIN_DIR -- no Go/Node toolchain needed on the host. Trivy
       # pulls the image directly from GHCR via OCI, so the runner's
       # preinstalled Docker daemon is also unused here.
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v4
         with:
           cache: true
 
