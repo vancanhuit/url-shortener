@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
 # [MISE] description="Format code (gofumpt + goimports via golangci-lint formatters)."
-# [MISE] depends=["lint-install"]
 set -euo pipefail
-bindir="${BIN_DIR:-$HOME/.local/bin}"
-"$bindir/golangci-lint" fmt
+golangci-lint fmt
