@@ -54,18 +54,18 @@ func counterValue(t *testing.T, cv *prometheus.CounterVec, lvs ...string) float6
 func TestMetricsMiddleware_CountsRequests(t *testing.T) {
 	t.Parallel()
 	r, total, _ := newMetricsRouterForTest(t, map[string]int{
-		"/healthz": http.StatusOK,
+		"/livez": http.StatusOK,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/livez", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if got := counterValue(t, total, "GET", "/healthz", "200"); got != 1 {
-		t.Errorf("http_requests_total{GET,/healthz,200} = %v, want 1", got)
+	if got := counterValue(t, total, "GET", "/livez", "200"); got != 1 {
+		t.Errorf("http_requests_total{GET,/livez,200} = %v, want 1", got)
 	}
 }
 

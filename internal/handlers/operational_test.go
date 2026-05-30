@@ -40,11 +40,11 @@ func do(t *testing.T, h http.Handler, path string) (int, map[string]any) {
 	return rec.Code, body
 }
 
-func TestHealthz_AlwaysOK(t *testing.T) {
+func TestLivez_AlwaysOK(t *testing.T) {
 	t.Parallel()
 
 	e := newChiRouter(nil)
-	code, body := do(t, e, "/healthz")
+	code, body := do(t, e, "/livez")
 	if code != http.StatusOK {
 		t.Errorf("status = %d, want 200", code)
 	}

@@ -1,6 +1,6 @@
 // Package handlers contains the HTTP handlers for the url-shortener API.
 //
-// This file implements the operational endpoints (`/healthz`, `/readyz`,
+// This file implements the operational endpoints (`/livez`, `/readyz`,
 // `/version`) used by orchestrators and humans to verify the running binary.
 package handlers
 
@@ -50,17 +50,17 @@ func (h *Operational) AddReadinessCheck(name string, check func(ctx context.Cont
 	h.checks[name] = pingFunc(check)
 }
 
-// Mount registers /healthz, /readyz, /version on r.
+// Mount registers /livez, /readyz, /version on r.
 func (h *Operational) Mount(r chi.Router) {
-	r.Get("/healthz", h.Healthz)
+	r.Get("/livez", h.Livez)
 	r.Get("/readyz", h.Readyz)
 	r.Get("/version", h.Version)
 }
 
-// Healthz is the liveness probe: it returns 200 as long as the process is
+// Livez is the liveness probe: it returns 200 as long as the process is
 // running and the HTTP stack is responsive. It deliberately has no
 // dependencies so a flapping database does not cause restarts.
-func (h *Operational) Healthz(w http.ResponseWriter, _ *http.Request) {
+func (h *Operational) Livez(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

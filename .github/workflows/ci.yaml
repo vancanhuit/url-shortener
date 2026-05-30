@@ -285,7 +285,7 @@ jobs:
 
       # `--wait` blocks until each service's healthcheck reports
       # healthy. The server's healthcheck invokes the binary's own
-      # `healthcheck` subcommand, which dials its own /healthz, so by
+      # `healthcheck` subcommand, which dials its own /livez, so by
       # the time `up` returns the listener is accepting traffic.
       # AUTO_MIGRATE=true (set in compose.yaml) ensures the schema is
       # applied before that point.

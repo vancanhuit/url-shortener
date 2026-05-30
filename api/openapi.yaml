@@ -17,7 +17,7 @@ info:
   description: |
     The url-shortener service exposes a small JSON HTTP API plus a
     public 302 redirect endpoint. This document describes both, along
-    with the operational endpoints (`/healthz`, `/readyz`,
+    with the operational endpoints (`/livez`, `/readyz`,
     `/version`) used by orchestrators and humans.
 
     ## Conventions
@@ -291,9 +291,8 @@ paths:
         expired link can never be served from cache.
 
         Soft-deleted and expired links return `410 Gone`. The
-        response body is plain text (Echo's default error renderer
-        for non-JSON paths); programmatic clients that need the
-        machine-readable `code` field should call
+        response body is plain text; programmatic clients that need
+        the machine-readable `code` field should call
         `GET /api/v1/links/{code}` instead.
       operationId: redirectLink
       responses:
@@ -346,7 +345,7 @@ paths:
                 type: object
                 description: An OpenAPI 3.0 document.
 
-  /healthz:
+  /livez:
     get:
       tags: [operational]
       summary: Liveness probe.
@@ -355,7 +354,7 @@ paths:
         stack is responsive. Has no dependencies on Postgres or
         Redis -- a flapping database must not cause Kubernetes to
         restart the pod.
-      operationId: healthz
+      operationId: livez
       responses:
         '200':
           description: The process is alive.

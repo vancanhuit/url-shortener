@@ -25,7 +25,7 @@ import (
 	"go.uber.org/goleak"
 )
 
-// waitForReady polls /healthz until it returns 200 or the deadline expires.
+// waitForReady polls /livez until it returns 200 or the deadline expires.
 func waitForReady(t *testing.T, url string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -65,8 +65,8 @@ func TestServer_OperationalEndpointsOverRealNetwork(t *testing.T) {
 	base, stop := startFullServer(t)
 	defer stop()
 
-	t.Run("healthz", func(t *testing.T) {
-		code, body := getJSON(t, base+"/healthz")
+	t.Run("livez", func(t *testing.T) {
+		code, body := getJSON(t, base+"/livez")
 		if code != http.StatusOK {
 			t.Errorf("status = %d, want 200", code)
 		}
@@ -222,8 +222,8 @@ func TestServer_GracefulShutdownClosesListener(t *testing.T) {
 	base, stop := startFullServer(t)
 
 	// Verify the server is responsive.
-	if code, _ := getJSON(t, base+"/healthz"); code != http.StatusOK {
-		t.Fatalf("pre-shutdown healthz = %d", code)
+	if code, _ := getJSON(t, base+"/livez"); code != http.StatusOK {
+		t.Fatalf("pre-shutdown livez = %d", code)
 	}
 
 	stop() // cancels context, waits for Serve to return

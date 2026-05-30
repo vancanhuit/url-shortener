@@ -33,7 +33,7 @@
 #       Prereq:    just dev-certs        (one-time per host)
 #       Bring up:  docker compose --profile=tls up --wait -d
 #       Tear down: docker compose --profile=tls down -v
-#       Test:      curl https://localhost:8443/healthz
+#       Test:      curl https://localhost:8443/livez
 #
 # Every service is profile-gated, so a bare `docker compose up` starts
 # nothing. That's intentional: the previous arrangement (default
@@ -140,7 +140,7 @@ services:
     ports:
       - "8080:8080"
     # Distroless has no curl/wget; the binary's `healthcheck` subcommand
-    # probes its own /healthz so docker / `up --wait` can tell when the
+    # probes its own /livez so docker / `up --wait` can tell when the
     # server is actually accepting requests (rather than just "container
     # started").
     healthcheck:
@@ -203,7 +203,7 @@ services:
     # host's local CA trust). The probe is a liveness check, not a
     # security boundary.
     healthcheck:
-      test: ["CMD", "/usr/local/bin/url-shortener", "healthcheck", "--url=https://127.0.0.1:8443/healthz", "--insecure"]
+      test: ["CMD", "/usr/local/bin/url-shortener", "healthcheck", "--url=https://127.0.0.1:8443/livez", "--insecure"]
       interval: 5s
       timeout: 3s
       retries: 10

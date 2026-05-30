@@ -378,7 +378,7 @@ tidy:
     go mod tidy
 
 # Smoke-check a running url-shortener stack: hit the operational endpoints
-# (`/healthz`, `/readyz`, `/version`), the embedded static assets, and a
+# (`/livez`, `/readyz`, `/version`), the embedded static assets, and a
 # real shorten -> fetch -> redirect cycle. The same script CI's
 # `compose-smoke` job runs against the `dev` compose profile after
 # `docker compose --profile=dev up --wait`, factored out here so a dev
@@ -404,8 +404,8 @@ compose-smoke:
     set -euo pipefail
     base="http://localhost:8080"
 
-    echo "== /healthz =="
-    curl --fail-with-body -sS "$base/healthz" \
+    echo "== /livez =="
+    curl --fail-with-body -sS "$base/livez" \
         | tee /dev/stderr | jq -e '.status == "ok"' >/dev/null
 
     echo "== /readyz =="
@@ -494,7 +494,7 @@ compose-smoke:
 #   2. Bring up `--profile=tls` with TLS_CERTS_DIR pointing at the
 #      tempdir's certs/ subdir, so the existing `dev/certs/`
 #      contents are untouched.
-#   3. Hit /healthz, /readyz, /version over HTTPS with
+#   3. Hit /livez, /readyz, /version over HTTPS with
 #      `--cacert <tempdir>/rootCA.pem` -- a strict check that the
 #      server is actually serving the cert we just signed.
 #   4. Rotate the leaf cert in-place and assert the running server
@@ -567,8 +567,8 @@ tls-smoke:
 
     base="https://localhost:8443"
 
-    echo "== /healthz (curl --cacert) =="
-    curl --fail-with-body -sS --cacert "$cacert" "$base/healthz" \
+    echo "== /livez (curl --cacert) =="
+    curl --fail-with-body -sS --cacert "$cacert" "$base/livez" \
         | tee /dev/stderr | jq -e '.status == "ok"' >/dev/null
 
     echo "== /readyz =="
@@ -610,7 +610,7 @@ tls-smoke:
     # chain is genuinely walked rather than e.g. the compose stack
     # serving a default fallback that happens to match.
     echo "== curl without --cacert must fail TLS verification =="
-    if curl --fail-with-body -sS -o /dev/null "$base/healthz" 2>/dev/null; then
+    if curl --fail-with-body -sS -o /dev/null "$base/livez" 2>/dev/null; then
         echo "expected TLS verification failure, got success" >&2
         exit 1
     fi
