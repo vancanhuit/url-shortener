@@ -2,7 +2,7 @@
 
 // End-to-end TLS smoke test: generates a self-signed cert at test time,
 // brings up the full server with cfg.TLSCertFile + cfg.TLSKeyFile set,
-// hits /healthz over HTTPS, and verifies the handshake + response work.
+// hits /livez over HTTPS, and verifies the handshake + response work.
 //
 // This exercises the cfg.TLSCertFile branch of server.Serve without
 // requiring any cert material to be checked into the repo. Requires
@@ -244,13 +244,13 @@ func TestServer_TLSListenerServesHTTPS(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	// Poll /healthz until the server is up. The server starts the
+	// Poll /livez until the server is up. The server starts the
 	// listener synchronously inside Serve's goroutine but TLS adds a
 	// handshake on top, so the first few attempts may race.
 	deadline := time.Now().Add(5 * time.Second)
 	var resp *http.Response
 	for time.Now().Before(deadline) {
-		resp, err = client.Get(addr + "/healthz")
+		resp, err = client.Get(addr + "/livez")
 		if err == nil && resp.StatusCode == http.StatusOK {
 			break
 		}
@@ -260,7 +260,7 @@ func TestServer_TLSListenerServesHTTPS(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	if err != nil {
-		t.Fatalf("GET %s/healthz over HTTPS: %v", addr, err)
+		t.Fatalf("GET %s/livez over HTTPS: %v", addr, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -274,7 +274,7 @@ func TestServer_TLSListenerServesHTTPS(t *testing.T) {
 	// successful at the HTTP level), but the 400 status -- distinct
 	// from the 200 we'd see if a plain-HTTP server were also on the
 	// listener -- proves the TLS branch was the only one mounted.
-	plainResp, plainErr := http.Get("http://" + ln.Addr().String() + "/healthz")
+	plainResp, plainErr := http.Get("http://" + ln.Addr().String() + "/livez")
 	if plainErr != nil {
 		t.Logf("plain-HTTP-to-TLS request errored (also acceptable): %v", plainErr)
 	} else {

@@ -56,7 +56,7 @@ func TestSpecJSON_IsValidJSONAndPreservesStructure(t *testing.T) {
 		"/api/v1/links/{code}",
 		"/r/{code}",
 		"/api/v1/openapi.json",
-		"/healthz",
+		"/livez",
 		"/readyz",
 		"/version",
 	} {

@@ -100,7 +100,7 @@ EXPOSE 8080
 
 USER nonroot:nonroot
 
-# Probe the binary's own /healthz via the `healthcheck` subcommand.
+# Probe the binary's own /livez via the `healthcheck` subcommand.
 # Distroless ships neither curl nor wget, so the binary itself is the
 # probe. Mirrors the compose.yaml healthcheck so `docker run` users get
 # the same liveness signal without composing a stack. Kubernetes and

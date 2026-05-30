@@ -175,7 +175,7 @@ func NewLinks(cfg LinksConfig) *Links {
 
 // Mount registers the API + redirect routes on r. The public redirect
 // lives under /r/{code} (rather than /{code}) so it can never shadow
-// operational endpoints (/healthz, /readyz, /version) or future
+// operational endpoints (/livez, /readyz, /version) or future
 // top-level routes like /api, static assets, or HTML pages.
 //
 // createMW are route-scoped middlewares attached only to

@@ -110,7 +110,7 @@ func startFullServerWithDeps(t *testing.T) (string, *store.Store, *cache.Client,
 		}
 	}
 
-	waitForReady(t, "http://"+ln.Addr().String()+"/healthz")
+	waitForReady(t, "http://"+ln.Addr().String()+"/livez")
 	return "http://" + ln.Addr().String(), st, cc, stop
 }
 
@@ -428,7 +428,7 @@ func TestServer_GracefulShutdownDrainsBackgroundTasks(t *testing.T) {
 	go func() { done <- srv.Serve(runCtx, ln) }()
 
 	base := "http://" + ln.Addr().String()
-	waitForReady(t, base+"/healthz")
+	waitForReady(t, base+"/livez")
 
 	// Seed a link so the redirect has somewhere to point. CreateLink
 	// inserts directly to skip the API layer (and its async paths).

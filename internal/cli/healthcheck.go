@@ -19,17 +19,17 @@ import (
 //	  test: ["CMD", "/usr/local/bin/url-shortener", "healthcheck"]
 //
 // For TLS-fronted services (the `tls` compose profile), pass
-// `--url=https://127.0.0.1:8443/healthz --insecure` so the probe
+// `--url=https://127.0.0.1:8443/livez --insecure` so the probe
 // skips cert verification -- the certificate is intended for the
 // outside world, not the in-container loopback hop.
 func newHealthcheckCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "healthcheck",
-		Usage: "Probe the local /healthz endpoint and exit 0 when it returns 200",
+		Usage: "Probe the local /livez endpoint and exit 0 when it returns 200",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "url",
-				Value: "http://127.0.0.1:8080/healthz",
+				Value: "http://127.0.0.1:8080/livez",
 				Usage: "URL to probe",
 			},
 			&cli.DurationFlag{

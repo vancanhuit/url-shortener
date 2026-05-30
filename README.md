@@ -118,7 +118,7 @@ Go builder runs.
 ./bin/url-shortener migrate down  # roll back the most recent migration
 ./bin/url-shortener migrate status
 ./bin/url-shortener migrate up --database-url postgres://...  # override URL_SHORTENER_DATABASE_URL
-./bin/url-shortener healthcheck   # probe /healthz; used by the docker HEALTHCHECK
+./bin/url-shortener healthcheck   # probe /livez; used by the docker HEALTHCHECK
 ```
 
 ## Configuration
@@ -345,7 +345,7 @@ The HTTP server exposes three operational endpoints:
 
 | Endpoint    | Purpose                          | Behaviour                                                                                     |
 | ----------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `/healthz`  | Liveness probe                   | Always returns `200` + `{"status":"ok"}` while the process is responsive. No dependencies.    |
+| `/livez`   | Liveness probe                   | Always returns `200` + `{"status":"ok"}` while the process is responsive. No dependencies.    |
 | `/readyz`   | Readiness probe                  | Pings every registered dependency. Returns `200` when all are healthy, `503` otherwise.       |
 | `/version`  | Build metadata                   | Returns `{"version":"...","commit":"...","date":"..."}` baked into the binary at build time.  |
 
@@ -397,7 +397,7 @@ distroless container and exposes the app on `:8443`:
 ```sh
 just dev-certs                                  # one-time per host
 just up-tls -d --build --wait
-curl https://localhost:8443/healthz             # {"status":"ok"}
+curl https://localhost:8443/livez             # {"status":"ok"}
 just down-tls -v
 ```
 

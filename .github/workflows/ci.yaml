@@ -106,7 +106,7 @@ jobs:
 
   openapi:
     name: openapi (spectral)
-    # Lint the OpenAPI 3.1 document at api/openapi.yaml using Spectral.
+    # Lint the OpenAPI 3.0 document at api/openapi.yaml using Spectral.
     # Spectral lives in package.json's devDependencies and is invoked
     # via `just lint-openapi`, which calls the `lint:openapi` npm
     # script with the project ruleset (.spectral.yaml). A drift
@@ -285,7 +285,7 @@ jobs:
 
       # `--wait` blocks until each service's healthcheck reports
       # healthy. The server's healthcheck invokes the binary's own
-      # `healthcheck` subcommand, which dials its own /healthz, so by
+      # `healthcheck` subcommand, which dials its own /livez, so by
       # the time `up` returns the listener is accepting traffic.
       # AUTO_MIGRATE=true (set in compose.yaml) ensures the schema is
       # applied before that point.
