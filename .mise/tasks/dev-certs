@@ -2,16 +2,6 @@
 # [MISE] description="Generate a host-trusted dev TLS cert + key into dev/certs/ via mkcert."
 set -euo pipefail
 
-if ! command -v mkcert >/dev/null 2>&1; then
-    echo 'mkcert not found on PATH.' >&2
-    echo 'Install instructions:' >&2
-    echo '  Linux (apt-based): sudo apt install -y libnss3-tools && \' >&2
-    echo '    curl -L -o ~/.local/bin/mkcert "https://dl.filippo.io/mkcert/latest?for=linux/amd64" && \' >&2
-    echo '    chmod +x ~/.local/bin/mkcert' >&2
-    echo '  macOS: brew install mkcert nss' >&2
-    exit 1
-fi
-
 mkcert -install >/dev/null
 mkdir -p dev/certs
 mkcert \

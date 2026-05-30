@@ -3,12 +3,10 @@ go = "1.26.3"
 node = "24.16.0"
 # JDK for @openapitools/openapi-generator-cli (used by `mise run web-generate`).
 java = "temurin-21"
-
-[env]
-# Pinned versions for self-installed binaries. Scripts use these as defaults
-# and fall back to the literal value when the env var is not set externally.
-GOLANGCI_LINT_VERSION = "2.11.4"
-TRIVY_VERSION = "0.70.0"
+golangci-lint = "2.11.4"
+trivy = "0.70.0"
+git-cliff = "2.13.1"
+mkcert = "1.4.4"
 
 [tasks.init]
 description = "One-time bootstrap: install Node devDependencies (husky + commitlint)."

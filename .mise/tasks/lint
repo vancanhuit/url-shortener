@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# [MISE] description="Run linters (auto-installs golangci-lint at the pinned version if missing)."
-# [MISE] depends=["lint-install", "web-build", "tidy"]
+# [MISE] description="Run linters (golangci-lint is managed by mise)."
+# [MISE] depends=["web-build", "tidy"]
 set -euo pipefail
-bindir="${BIN_DIR:-$HOME/.local/bin}"
-"$bindir/golangci-lint" run -v --build-tags=integration
+golangci-lint run -v --build-tags=integration
