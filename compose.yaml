@@ -14,7 +14,7 @@
 #
 #   `test` profile -- `db-test`, `redis-test`
 #     Isolated db + redis on alternate host ports (5433 / 6380) with
-#     their own volumes. Driven by `just test-integration`, which runs
+#     their own volumes. Driven by `mise run test-integration`, which runs
 #     the binary from the host. Alternate ports + volumes mean dev and
 #     test stacks coexist, so a running dev environment doesn't have
 #     to be torn down to run the integration suite.
@@ -25,12 +25,12 @@
 #   `tls` profile  -- `db`, `redis`, `server-tls`
 #     Mirrors `dev` but the binary speaks HTTPS on :8443 using a static
 #     cert + key mounted from `./dev/certs/` (generate them once with
-#     `just dev-certs`, gitignored). `db` and `redis` are reused via
+#     `mise run dev-certs`, gitignored). `db` and `redis` are reused via
 #     multi-profile membership; the `tls` profile also exposes them on
 #     the same standard host ports as `dev` so the two profiles must
 #     not be running simultaneously.
 #
-#       Prereq:    just dev-certs        (one-time per host)
+#       Prereq:    mise run dev-certs  (one-time per host)
 #       Bring up:  docker compose --profile=tls up --wait -d
 #       Tear down: docker compose --profile=tls down -v
 #       Test:      curl https://localhost:8443/livez
@@ -157,7 +157,7 @@ services:
 
   # --- `tls` profile --------------------------------------------------------
   # Same binary as `server`, but speaks HTTPS on :8443 using the cert +
-  # key in ./dev/certs/ (run `just dev-certs` to generate them; both
+  # key in ./dev/certs/ (run `mise run dev-certs` to generate them; both
   # files are gitignored). The compose volume is read-only so an
   # accidental rotation in the running container can't truncate the
   # PEM files on the host.
@@ -188,8 +188,8 @@ services:
       URL_SHORTENER_AUTO_MIGRATE: "true"
       URL_SHORTENER_TLS_CERT_FILE: /etc/url-shortener/certs/cert.pem
       URL_SHORTENER_TLS_KEY_FILE: /etc/url-shortener/certs/key.pem
-    # Cert source defaults to ./dev/certs (the dir `just dev-certs`
-    # writes to). The `just tls-smoke` recipe overrides this with
+    # Cert source defaults to ./dev/certs (the dir `mise run dev-certs`
+    # writes to). The `mise run tls-smoke` task overrides this with
     # TLS_CERTS_DIR pointing at an isolated tempdir so the smoke run
     # never clobbers a developer's host-trusted dev certs.
     volumes:

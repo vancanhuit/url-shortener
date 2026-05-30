@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# [MISE] description="Build the local Docker image (url-shortener:dev) and scan it with Trivy."
+# [MISE] depends=["docker-build", "trivy-install"]
+set -euo pipefail
+bindir="${BIN_DIR:-$HOME/.local/bin}"
+"$bindir/trivy" image \
+    --severity HIGH,CRITICAL \
+    --ignore-unfixed \
+    --exit-code 1 \
+    --no-progress \
+    url-shortener:dev

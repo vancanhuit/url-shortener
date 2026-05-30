@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# [MISE] description="Cross-compile release binaries for linux/darwin x amd64/arm64 into ./dist."
+# [MISE] depends=["web-build"]
+set -euo pipefail
+
+VERSION=$(git describe --tags --always --dirty=-dev --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev")
+COMMIT=$(git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown")
+DATE=$(TZ=UTC git show -s --format='%cd' --date='format-local:%Y-%m-%dT%H:%M:%SZ' HEAD 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS="-s -w \
+  -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=${VERSION} \
+  -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit=${COMMIT} \
+  -X github.com/vancanhuit/url-shortener/internal/buildinfo.date=${DATE}"
+
+out=dist
+rm -rf "$out"
+mkdir -p "$out"
+
+for plat in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+    os="${plat%/*}"
+    arch="${plat#*/}"
+    stem="url-shortener_${VERSION}_${os}_${arch}"
+    stage="$out/$stem"
+    mkdir -p "$stage"
+    echo ">> $plat -> $stage/url-shortener"
+    CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+        go build -trimpath -ldflags="${LDFLAGS}" \
+            -o "$stage/url-shortener" ./cmd/url-shortener
+    cp README.md "$stage/"
+    tar -C "$out" -czf "$out/${stem}.tar.gz" "$stem"
+    (cd "$out" && sha256sum "${stem}.tar.gz" > "${stem}.tar.gz.sha256")
+    rm -rf "$stage"
+done
+
+(cd "$out" && sha256sum *.tar.gz > SHA256SUMS)
+ls -lh "$out"

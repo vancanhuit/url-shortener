@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# [MISE] description="Run the binary locally. Extra args are forwarded."
+set -euo pipefail
+go run ./cmd/url-shortener "$@"

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# [MISE] description="Run govulncheck against the source."
+set -euo pipefail
+
+# Always pull the latest CLI: govulncheck's value is the database it queries,
+# and the CLI itself rarely sees breaking changes worth pinning. `go install
+# ... @latest` is a fast no-op when the binary is already current.
+gobin="${GOBIN:-$(go env GOPATH)/bin}"
+go install golang.org/x/vuln/cmd/govulncheck@latest
+# `-show=verbose` makes the per-run module + package inventory visible in CI
+# logs, so a failed run is easy to triage.
+"$gobin/govulncheck" -show=verbose -tags=integration ./...

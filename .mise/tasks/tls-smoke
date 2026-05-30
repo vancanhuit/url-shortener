@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# [MISE] description="Smoke-test the TLS compose profile with an isolated mkcert root CA."
+set -euo pipefail
+
+if ! command -v mkcert >/dev/null 2>&1; then
+    echo 'mkcert not found on PATH; see `mise run dev-certs` for install instructions.' >&2
+    exit 1
+fi
+if ! command -v openssl >/dev/null 2>&1; then
+    echo 'openssl not found on PATH; required to verify cert hot-reload.' >&2
+    exit 1
+fi
+
+tls_serial() {
+    openssl s_client \
+        -connect localhost:8443 \
+        -servername localhost \
+        -CAfile "$cacert" \
+        -verify_return_error \
+        </dev/null 2>/dev/null \
+        | openssl x509 -noout -serial 2>/dev/null \
+        | sed -E 's/^serial=//'
+}
+
+workdir=$(mktemp -d -t url-shortener-tls-smoke-XXXXXX)
+export TLS_CERTS_DIR="$workdir/certs"
+mkdir -p "$TLS_CERTS_DIR"
+
+cleanup() {
+    local rc=$?
+    echo "== teardown =="
+    docker compose --profile=tls down -v --remove-orphans >/dev/null 2>&1 || true
+    rm -rf "$workdir"
+    exit $rc
+}
+trap cleanup EXIT
+
+echo "== mkcert (isolated CAROOT=$workdir/ca) =="
+export CAROOT="$workdir/ca"
+mkdir -p "$CAROOT"
+mkcert \
+    -cert-file "$TLS_CERTS_DIR/cert.pem" \
+    -key-file  "$TLS_CERTS_DIR/key.pem" \
+    localhost 127.0.0.1 ::1 >/dev/null
+chmod 0644 "$TLS_CERTS_DIR/key.pem"
+cacert="$CAROOT/rootCA.pem"
+test -f "$cacert" || { echo "rootCA.pem not at $cacert" >&2; exit 1; }
+
+echo "== docker compose --profile=tls up --wait --build =="
+docker compose --profile=tls up --wait --detach --build
+
+base="https://localhost:8443"
+
+echo "== /livez (curl --cacert) =="
+curl --fail-with-body -sS --cacert "$cacert" "$base/livez" \
+    | tee /dev/stderr | jq -e '.status == "ok"' >/dev/null
+
+echo "== /readyz =="
+curl --fail-with-body -sS --cacert "$cacert" "$base/readyz" \
+    | tee /dev/stderr \
+    | jq -e '.status == "ok" and .postgres == "ok" and .redis == "ok"' >/dev/null
+
+echo "== /version =="
+curl --fail-with-body -sS --cacert "$cacert" "$base/version" \
+    | tee /dev/stderr | jq -e 'has("version")' >/dev/null
+
+echo "== TLS cert hot-reload (rotate leaf cert in place) =="
+before_serial=$(tls_serial)
+test -n "$before_serial" || { echo "failed to read initial TLS serial" >&2; exit 1; }
+
+mkcert \
+    -cert-file "$TLS_CERTS_DIR/cert.pem" \
+    -key-file  "$TLS_CERTS_DIR/key.pem" \
+    localhost 127.0.0.1 ::1 >/dev/null
+chmod 0644 "$TLS_CERTS_DIR/key.pem"
+
+after_serial=""
+for _ in $(seq 1 50); do
+    after_serial=$(tls_serial || true)
+    if [ -n "$after_serial" ] && [ "$after_serial" != "$before_serial" ]; then
+        break
+    fi
+    sleep 0.1
+done
+test -n "$after_serial" || { echo "failed to read TLS serial after rotation" >&2; exit 1; }
+test "$after_serial" != "$before_serial" \
+    || { echo "TLS cert serial did not change after in-place rotation" >&2; exit 1; }
+
+echo "== curl without --cacert must fail TLS verification =="
+if curl --fail-with-body -sS -o /dev/null "$base/livez" 2>/dev/null; then
+    echo "expected TLS verification failure, got success" >&2
+    exit 1
+fi
+
+echo "ok"

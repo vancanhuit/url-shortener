@@ -27,7 +27,7 @@ coverage.html
 node_modules/
 
 # Vite + Svelte build output. The Go binary embeds web/dist/ via
-# `//go:embed`, so `just build` re-runs `just web-build` whenever it's
+# `//go:embed`, so `mise run build` re-runs `mise run web-build` whenever it's
 # missing. CI and the multi-stage Dockerfile do the same.
 /web/dist/
 
@@ -36,5 +36,8 @@ node_modules/
 # artifacts, not source -- the npm registry is the source of truth.
 /web/public/static/
 
-# Release artifacts produced by `just release-binaries`.
+# Release artifacts produced by `mise run release-binaries`.
 /dist/
+
+# mise local overrides (machine-specific tool versions or env vars).
+mise.local.toml
