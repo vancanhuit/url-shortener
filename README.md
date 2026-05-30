@@ -1,9 +1,12 @@
 # url-shortener
 
-A small URL shortener service written in Go.
+A small URL shortener service written in Go for learning and demonstration purposes.
+It features a REST API, a single-page web UI, and a Postgres + Redis backend.
+The project is designed with production readiness in mind,
+including configuration best practices, security headers, health checks,
+and a CI/CD pipeline that builds multi-arch images with SBOMs and provenance.
 
-> **Status:** active rewrite from Python/FastAPI to Go. The repository history
-> was reset on `main` to start fresh; see `CONTRIBUTING.md` for the workflow.
+To simplify the web service, no authentication is implemented.
 
 ## Tech stack
 
@@ -22,7 +25,6 @@ A small URL shortener service written in Go.
   written in TypeScript and compiled into hashed bundles that the Go
   binary embeds via `//go:embed`.
 - [mise](https://mise.jdx.dev/) as the task runner and tool version manager.
-- [Dagger](https://dagger.io/) for the CI/CD pipeline (added in a later phase).
 
 ## Getting started
 
@@ -46,7 +48,7 @@ Prerequisites:
 - **[mise](https://mise.jdx.dev/)** &mdash; the task runner and tool
   version manager; every workflow in this README routes through it.
   Running `mise install` installs Go, Node, and Java at the versions
-  pinned in `mise.toml`. Install mise from https://mise.jdx.dev/.
+  pinned in `mise.toml`. Install mise from <https://mise.jdx.dev/>.
 - **`golangci-lint` v2** &mdash; auto-installed by `mise run lint` at
   the version pinned in `mise.toml`, so a manual install is
   optional.
@@ -255,7 +257,7 @@ Validation: `target_url` must be `http`/`https`, have a host, and be at most
 absorbs honest client/server clock skew). Status codes: `400` for
 malformed JSON, `409` for a duplicate user-supplied code, `422` for
 validation failures, `404` for unknown codes, `410 Gone` for a
-retired code (expired *or* soft-deleted; returned by both
+retired code (expired _or_ soft-deleted; returned by both
 `GET /api/v1/links/:code` and `GET /r/:code` -- distinct from `404`
 so clients can tell a once-valid code from one that never existed).
 
@@ -327,11 +329,11 @@ The binary serves a single-page Svelte app at `/`:
   expiry hint when one was set.
 - A "Recent" list backed by Postgres, paginated cursor-style via the
   `id DESC` order. Each row carries a click-count badge, an inline
-  expiry badge, and a *Delete* button.
+  expiry badge, and a _Delete_ button.
   - Each row polls `GET /api/v1/links/:code` every 5s and refreshes
     its click-count + expiry view in place. A row that 404s or 410s
     is dropped on the next refresh of the parent list.
-  - *Load more* fetches `GET /api/v1/links?before=<cursor>` and
+  - _Load more_ fetches `GET /api/v1/links?before=<cursor>` and
     appends rows; pagination ends when `next_cursor` is `null`.
 
 Static assets are served from the embedded `web/dist/` filesystem:
