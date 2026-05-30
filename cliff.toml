@@ -79,9 +79,7 @@ commit_parsers = [
   { message = "^ci",                    group = "<!-- 7 -->🏗️ Build" },
   # Surface dependency bumps from Dependabot as their own section (more
   # informative than lumping them in with hand-authored build changes).
-  # Plain `chore` and `style` are dropped from release notes since they
-  # don't affect users.
   { message = "^chore\\(deps",          group = "<!-- 8 -->📦 Dependencies" },
-  { message = "^chore",                 skip  = true },
+  { message = "^chore",                 group = "<!-- 9 -->🔧 Chores" },
   { message = "^style",                 skip  = true },
 ]
