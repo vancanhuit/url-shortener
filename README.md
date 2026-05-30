@@ -21,7 +21,7 @@ A small URL shortener service written in Go.
   [Vite](https://vite.dev/) + [Tailwind CSS v4](https://tailwindcss.com/),
   written in TypeScript and compiled into hashed bundles that the Go
   binary embeds via `//go:embed`.
-- [Just](https://github.com/casey/just) as the task runner.
+- [mise](https://mise.jdx.dev/) as the task runner and tool version manager.
 - [Dagger](https://dagger.io/) for the CI/CD pipeline (added in a later phase).
 
 ## Getting started
@@ -29,7 +29,7 @@ A small URL shortener service written in Go.
 ### Development environment
 
 The toolchain assumes a **Unix-like host** &mdash; Linux, macOS, or
-**WSL2** on Windows. The `Justfile` recipes use bash with
+**WSL2** on Windows. The mise task scripts use bash with
 `set -euo pipefail`, the npm scripts shell out to `mkdir`/`cp`,
 and the integration suite drives a local Docker daemon. Native
 Windows (cmd / PowerShell) is **not** supported; if you're on
@@ -43,10 +43,12 @@ Prerequisites:
 - **Node.js 24+** &mdash; for the Vite + Svelte + Tailwind v4 SPA
   toolchain under `web/`. Required only when building the web assets
   locally; the `Dockerfile` brings its own Node stage.
-- **[Just](https://github.com/casey/just)** &mdash; the task runner;
-  every workflow in this README routes through it.
-- **`golangci-lint` v2** &mdash; auto-installed by `just lint` at
-  the version pinned in the `Justfile`, so a manual install is
+- **[mise](https://mise.jdx.dev/)** &mdash; the task runner and tool
+  version manager; every workflow in this README routes through it.
+  Running `mise install` installs Go, Node, and Java at the versions
+  pinned in `mise.toml`. Install mise from https://mise.jdx.dev/.
+- **`golangci-lint` v2** &mdash; auto-installed by `mise run lint` at
+  the version pinned in `mise.toml`, so a manual install is
   optional.
 - **Docker** with the **Compose v2 plugin** and **Buildx** &mdash;
   Compose drives the local Postgres/Redis stack and the
@@ -63,30 +65,30 @@ Optional but useful:
   stack outside the test harness.
 
 The repository is the **single source of truth for tool versions**:
-`Justfile` pins `GOLANGCI_LINT_VERSION` and `TRIVY_VERSION`, the
-`Dockerfile` pins Go and Node `ARG`s, and CI overrides via env vars
-defined in `.github/workflows/ci.yaml`. There are no global
-installs of any of these tools required &mdash; running a recipe
-will install what it needs into `$(go env GOPATH)/bin` on demand.
+`mise.toml` pins `GOLANGCI_LINT_VERSION` and `TRIVY_VERSION`, the
+`Dockerfile` pins Go and Node `ARG`s, and CI installs everything via
+`jdx/mise-action`. There are no global installs of any of these tools
+required &mdash; running a task will install what it needs into
+`$(go env GOPATH)/bin` on demand.
 
 ### Workflow cheatsheet
 
 ```sh
-just init                              # install husky/commitlint dev dependencies
-just web-install                       # install npm deps for the Svelte + Vite + Tailwind toolchain
-just web-build                         # build the SPA into web/dist/ (consumed by //go:embed)
-just web-dev                           # vite dev server with HMR (proxies API + redirect to :8080)
-just web-check                         # svelte-check + tsc strict type-check
-just build                             # build ./bin/url-shortener (depends on web-build)
-just test                              # run unit tests with -race -v -cover
-just test-integration                  # bring up test-profile infra, migrate, run -tags=integration tests
-just lint                              # run golangci-lint (auto-installs the pinned version)
-just govulncheck                       # run govulncheck against the latest Go vuln database
-just trivy-image                              # build the Docker image and scan it with Trivy (HIGH/CRITICAL)
-just up -d --build --wait                     # bring up the full local dev stack (db + redis + server on 5432/6379/8080), git metadata injected
-just compose-smoke                            # smoke-check a running stack: operational endpoints + shorten/redirect cycle
-just down -v                                  # tear down the dev stack
-docker compose --profile=test down -v         # tear down the test-profile stack (db-test + redis-test on 5433/6380)
+mise run init                                  # install husky/commitlint dev dependencies
+mise run web-install                           # install npm deps for the Svelte + Vite + Tailwind toolchain
+mise run web-build                             # build the SPA into web/dist/ (consumed by //go:embed)
+mise run web-dev                               # vite dev server with HMR (proxies API + redirect to :8080)
+mise run web-check                             # svelte-check + tsc strict type-check
+mise run build                                 # build ./bin/url-shortener (depends on web-build)
+mise run test                                  # run unit tests with -race -v -cover
+mise run test-integration                      # bring up test-profile infra, migrate, run -tags=integration tests
+mise run lint                                  # run golangci-lint (auto-installs the pinned version)
+mise run govulncheck                           # run govulncheck against the latest Go vuln database
+mise run trivy-image                           # build the Docker image and scan it with Trivy (HIGH/CRITICAL)
+mise run up -- -d --build --wait               # bring up the full local dev stack (db + redis + server on 5432/6379/8080), git metadata injected
+mise run compose-smoke                         # smoke-check a running stack: operational endpoints + shorten/redirect cycle
+mise run down -- -v                            # tear down the dev stack
+docker compose --profile=test down -v          # tear down the test-profile stack (db-test + redis-test on 5433/6380)
 ```
 
 The `compose.yaml` defines two stacks side by side: the **`dev` profile**
@@ -101,7 +103,7 @@ breaks CI.
 
 The HTML UI is embedded in the binary via `//go:embed`, so the compiled
 assets in `web/static/` must exist at `go build` time. They're treated as
-build artifacts (gitignored): `just build` always runs `just web-build`
+build artifacts (gitignored): `mise run build` always runs `mise run web-build`
 first so a fresh checkout works without ceremony, and the multi-stage
 `Dockerfile` has a dedicated `node` stage that produces them before the
 Go builder runs.
@@ -200,7 +202,7 @@ viewers:
 - `GET /api/v1/redoc` -- [Redoc](https://github.com/Redocly/redoc) for
   read-only reference browsing. Vendored from `redoc`; works offline.
 
-CI lints the spec on every push (`just lint-openapi`, backed by
+CI lints the spec on every push (`mise run lint-openapi`, backed by
 [Spectral](https://github.com/stoplightio/spectral) with the project
 ruleset at [`.spectral.yaml`](.spectral.yaml)).
 
@@ -373,7 +375,7 @@ HTTP scheme on the same port will fail at the TLS handshake. The
 underlying `crypto/tls` defaults apply (TLS 1.2 minimum, modern
 cipher suites, HTTP/2 enabled).
 
-For local development, the [`just dev-certs`](Justfile) recipe
+For local development, the `mise run dev-certs` task
 generates a host-trusted cert + key under `dev/certs/` (gitignored)
 via [mkcert](https://github.com/FiloSottile/mkcert). The first run
 also installs mkcert's root CA into the host trust stores so
@@ -381,7 +383,7 @@ browsers and `curl` accept the cert without `-k`. Then either run
 the binary directly:
 
 ```sh
-just dev-certs
+mise run dev-certs
 URL_SHORTENER_TLS_CERT_FILE=dev/certs/cert.pem \
 URL_SHORTENER_TLS_KEY_FILE=dev/certs/key.pem \
 URL_SHORTENER_ADDR=:8443 \
@@ -395,10 +397,10 @@ or use the `tls` compose profile, which mounts `./dev/certs/` into a
 distroless container and exposes the app on `:8443`:
 
 ```sh
-just dev-certs                                  # one-time per host
-just up-tls -d --build --wait
+mise run dev-certs                                  # one-time per host
+mise run up-tls -- -d --build --wait
 curl https://localhost:8443/livez             # {"status":"ok"}
-just down-tls -v
+mise run down-tls -- -v
 ```
 
 The `tls` profile shares the `db` and `redis` services with `dev` (it
@@ -506,10 +508,10 @@ publishes:
 The Release body is generated by [git-cliff](https://git-cliff.org/)
 from the conventional-commit history between the previous and current
 semver tags, configured in [`cliff.toml`](cliff.toml). Preview locally
-with `just changelog` (defaults to "since latest tag"); the rendered
+with `mise run changelog` (defaults to "since latest tag"); the rendered
 markdown is written to `dist/CHANGELOG.md` (gitignored) and also
 echoed to stdout. Install git-cliff once via the snippet at the top
-of the recipe in the [`Justfile`](Justfile).
+of the task in [`.mise/tasks/changelog`](.mise/tasks/changelog).
 
 See `CONTRIBUTING.md` for the tag-and-push flow that produces them.
 

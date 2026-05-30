@@ -16,10 +16,10 @@
 
 ## Checklist
 
-- [ ] `just fmt` passes (no formatting diff)
-- [ ] `just lint` passes (0 issues)
-- [ ] `just test` passes (`go test -race ./...`)
-- [ ] `just test-integration` passes (if touching DB / Redis / server wiring)
+- [ ] `mise run fmt` passes (no formatting diff)
+- [ ] `mise run lint` passes (0 issues)
+- [ ] `mise run test` passes (`go test -race ./...`)
+- [ ] `mise run test-integration` passes (if touching DB / Redis / server wiring)
 - [ ] New behaviour is covered by tests
 - [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): subject`)
 

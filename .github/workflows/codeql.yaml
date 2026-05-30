@@ -30,11 +30,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Toolchain versions kept in lockstep with ci.yaml. Bump there
-  # first; this workflow re-asserts the literals so a CodeQL run
-  # cannot silently fall behind production CI on a Go bump.
-  GO_VERSION: 1.26.3
-  NODE_VERSION: 24.16.0
   # See ci.yaml for the rationale on the Node-24 opt-in flag.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -69,15 +64,10 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      # Same Go + Node + just toolchain the rest of CI uses, so the
-      # CodeQL autobuild step compiles against the same versions
-      # production builds compile against. Sharing the composite
+      # Same toolchain as the rest of CI (via mise). Sharing the composite
       # also means there's exactly one place to fix when toolchain
       # setup changes.
       - uses: ./.github/actions/setup-toolchain
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          node-version: ${{ env.NODE_VERSION }}
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
@@ -96,8 +86,8 @@ jobs:
       # results -- but using the same build path as ci.yaml /
       # release.yaml keeps the workflows mentally uniform and
       # surfaces any embed-time regressions here too.
-      - name: just web-build
-        run: just web-build
+      - name: mise run web-build
+        run: mise run web-build
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3

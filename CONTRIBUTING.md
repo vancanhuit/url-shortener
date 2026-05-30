@@ -4,25 +4,26 @@ Thanks for taking the time to contribute!
 
 ## Development workflow
 
-1. Install prerequisites: Go 1.26+, Node.js 20+, [Just](https://github.com/casey/just), `golangci-lint` v2.
+1. Install prerequisites: Go 1.26+, Node.js 24+, [mise](https://mise.jdx.dev/), `golangci-lint` v2.
+   Run `mise install` to install all tools at the versions pinned in `mise.toml`.
 2. Bootstrap dev tooling once per clone:
    ```sh
-   just init
+   mise run init
    ```
    This installs husky's git hooks and the commitlint CLI as a local dev dependency.
 3. Make changes on a feature branch, then run:
    ```sh
-   just fmt
-   just lint
-   just test
-   just build
+   mise run fmt
+   mise run lint
+   mise run test
+   mise run build
    ```
 4. Open a pull request against `main`.
 
 ## Commit messages
 
 We follow the [Conventional Commits 1.0](https://www.conventionalcommits.org/)
-specification. The local `commit-msg` hook (installed by `just init`) and the
+specification. The local `commit-msg` hook (installed by `mise run init`) and the
 `commitlint` GitHub Action enforce this on every commit / PR.
 
 ```
@@ -84,17 +85,17 @@ To cut a release locally:
 git checkout main && git pull --ff-only
 
 # 2. Preview what the release notes will say. With no arguments, the
-#    recipe auto-resolves the previous semver tag and renders commits
+#    task auto-resolves the previous semver tag and renders commits
 #    from there to HEAD. Output matches what the release workflow
 #    emits, since both invoke git-cliff against the same cliff.toml.
-just changelog
+mise run changelog
 
 # 3. Tag and push. The workflow takes it from there.
 git tag -a v1.2.3 -m "v1.2.3"
 git push origin v1.2.3
 ```
 
-Use `just --set VERSION v1.2.3 release-binaries` to produce the same archives
+Run `mise run release-binaries` to produce the same archives
 locally under `./dist/` (handy for smoke-testing before tagging).
 
 ## Code quality

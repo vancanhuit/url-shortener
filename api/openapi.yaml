@@ -52,7 +52,7 @@ info:
 
 servers:
   - url: http://localhost:8080
-    description: Local development server (compose / `just up`).
+    description: Local development server (compose / `mise run up`).
 
 tags:
   - name: links

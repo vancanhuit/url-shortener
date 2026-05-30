@@ -47,7 +47,7 @@ concurrency:
 env:
   # Pin trivy from the workflow so a single bump on `main` rolls out
   # to every scheduled run, and keep it in sync with TRIVY_VERSION
-  # in the Justfile (the recipe self-installs at this version).
+  # in mise.toml (the task self-installs at this version).
   TRIVY_VERSION: 0.70.0
   REGISTRY: ghcr.io
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -74,12 +74,14 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # `just trivy-scan` self-installs trivy at the version pinned
-      # in the Justfile (TRIVY_VERSION) into $HOME/.local/bin via
+      # `mise run trivy-scan` self-installs trivy at the version pinned
+      # in mise.toml (TRIVY_VERSION) into $HOME/.local/bin via
       # BIN_DIR -- no Go/Node toolchain needed on the host. Trivy
       # pulls the image directly from GHCR via OCI, so the runner's
       # preinstalled Docker daemon is also unused here.
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
 
       # GHCR allows anonymous pulls for public packages, but logging
       # in costs nothing and keeps the workflow working if the
@@ -107,11 +109,11 @@ jobs:
             echo "::notice::$ref does not exist yet, skipping"
           fi
 
-      # Same recipe `just trivy-image` uses, just pointed at a
+      # Same task `mise run trivy-image` uses, just pointed at a
       # registry ref instead of the local-build tag. HIGH/CRITICAL
       # gate, --ignore-unfixed, exit-code=1 on findings -- a red
       # run is the alarm.
-      - name: just trivy-scan
+      - name: mise run trivy-scan
         if: steps.probe.outputs.exists == 'true'
         run: |
-          just trivy-scan '${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.tag }}'
+          mise run trivy-scan '${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.tag }}'
