@@ -35,6 +35,7 @@ func newApp() *cli.Command {
 			newConfigCmd(),
 			newRunCmd(),
 			newMigrateCmd(),
+			newCleanupCmd(),
 			newHealthcheckCmd(),
 		},
 	}

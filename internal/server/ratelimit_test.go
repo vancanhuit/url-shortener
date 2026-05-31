@@ -208,3 +208,35 @@ type errorRateLimiter struct{}
 func (*errorRateLimiter) RateLimit(_ context.Context, _ string, _ int, _ time.Duration) (bool, int, error) {
 	return false, 0, errors.New("simulated redis error")
 }
+
+// TestEffectiveBurst pins down the RPS→burst defaulting logic so the
+// floor (1) and the doubling factor (2×RPS for fractional RPS) don't
+// silently regress.
+func TestEffectiveBurst(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name            string
+		rps             float64
+		configuredBurst int
+		want            int
+	}{
+		{"explicit burst wins", 10, 5, 5},
+		{"explicit burst wins even when small", 10, 1, 1},
+		{"zero burst, RPS=0.5 → floor 1", 0.5, 0, 1},
+		{"zero burst, RPS=0.99 → floor 1", 0.99, 0, 1},
+		{"zero burst, RPS=1 → 2", 1, 0, 2},
+		{"zero burst, RPS=10 → 20", 10, 0, 20},
+		{"zero burst, RPS=0 → floor 1", 0, 0, 1},
+		{"negative burst falls through to derived", 5, -3, 10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := effectiveBurst(tc.rps, tc.configuredBurst)
+			if got != tc.want {
+				t.Errorf("effectiveBurst(%v, %d) = %d, want %d",
+					tc.rps, tc.configuredBurst, got, tc.want)
+			}
+		})
+	}
+}

@@ -425,3 +425,22 @@ func (s *Store) SoftDeleteLink(ctx context.Context, dbtx DBTX, code string) erro
 	}
 	return nil
 }
+
+// PurgeExpiredAndDeleted hard-deletes links that have been retired --
+// soft-deleted (deleted_at IS NOT NULL) or past their expires_at -- for
+// longer than the grace window. Negative or zero grace is rejected;
+// callers that want "purge everything retired right now" should pass
+// a small positive value (e.g. 1 second) explicitly so the operational
+// intent is in the audit log, not implicit.
+//
+// Returns the number of rows physically removed.
+func (s *Store) PurgeExpiredAndDeleted(ctx context.Context, dbtx DBTX, grace time.Duration) (int64, error) {
+	if grace <= 0 {
+		return 0, errors.New("store: purge grace must be > 0")
+	}
+	tag, err := s.queriesFor(dbtx).PurgeExpiredAndDeleted(ctx, grace.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("store: purge expired/deleted: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
