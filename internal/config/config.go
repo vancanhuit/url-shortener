@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 )
 
 // EnvPrefix is the prefix applied to every environment variable.
@@ -186,11 +188,20 @@ func (c Config) Validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("config: database_url must not be empty")
 	}
+	// Parse the DSN now so a typo (missing scheme, bad port, unbalanced
+	// quote) surfaces as a clear validation error instead of as the first
+	// pool-acquire attempt failing with a less obvious message.
+	if _, err := pgx.ParseConfig(c.DatabaseURL); err != nil {
+		return fmt.Errorf("config: database_url: %w", err)
+	}
 	// Redis is a required runtime dependency: the cache is on the hot path
 	// for redirect lookups and the API treats it as always-present. Refuse
 	// to start instead of silently degrading.
 	if c.RedisURL == "" {
 		return fmt.Errorf("config: redis_url must not be empty")
+	}
+	if _, err := redis.ParseURL(c.RedisURL); err != nil {
+		return fmt.Errorf("config: redis_url: %w", err)
 	}
 
 	// Pool tunables: any explicit value must be non-negative; when both
