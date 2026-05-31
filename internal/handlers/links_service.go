@@ -274,6 +274,12 @@ func isPrivateHost(host string) bool {
 		// Strip the brackets so net.ParseIP can handle it.
 		hostname = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
 	}
+	// Drop any IPv6 zone identifier (e.g. "fe80::1%eth0"); ParseIP
+	// rejects scoped addresses, but the scope is meaningless in a URL
+	// and stripping it lets the link-local check below catch it.
+	if i := strings.Index(hostname, "%"); i >= 0 {
+		hostname = hostname[:i]
+	}
 	if strings.EqualFold(hostname, "localhost") {
 		return true
 	}

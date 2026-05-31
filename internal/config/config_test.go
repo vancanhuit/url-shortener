@@ -184,6 +184,8 @@ func TestValidate_RejectsBadValues(t *testing.T) {
 		"empty baseurl":      {Env: "prod", Addr: ":8080", BaseURL: "", LogLevel: "info", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: redisURL},
 		"empty database_url": {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: "", RedisURL: redisURL},
 		"empty redis_url":    {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: ""},
+		"bad database_url":   {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: "::not a dsn::", RedisURL: redisURL},
+		"bad redis_url":      {Env: "prod", Addr: ":8080", BaseURL: "x", LogLevel: "info", LogFormat: "json", DatabaseURL: databaseURL, RedisURL: "::not a url::"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

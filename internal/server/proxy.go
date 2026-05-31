@@ -49,10 +49,16 @@ func buildIPExtractor(trustedProxies []string) func(r *http.Request) string {
 
 		if trusted {
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				// Take the leftmost (client-provided) IP.
+				// Take the leftmost (client-provided) IP. A header value may
+				// be space-padded or contain garbage if an upstream proxy
+				// passed through a malformed value -- only return it if it
+				// parses as a real IP. Otherwise fall through to RemoteAddr
+				// so the rate-limit key is still well-formed.
 				parts := strings.SplitN(xff, ",", 2)
 				if ip := strings.TrimSpace(parts[0]); ip != "" {
-					return ip
+					if net.ParseIP(ip) != nil {
+						return ip
+					}
 				}
 			}
 		}

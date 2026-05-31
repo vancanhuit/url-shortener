@@ -110,6 +110,8 @@ func TestIsPrivateHost(t *testing.T) {
 
 		// IPv6 link-local
 		{"fe80::1", true},
+		{"fe80::1%eth0", true},     // link-local with zone identifier
+		{"[fe80::1%25eth0]", true}, // bracketed + percent-encoded zone
 
 		// IPv6 unique-local
 		{"fd00::1", true},
