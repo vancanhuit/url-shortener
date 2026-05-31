@@ -43,14 +43,7 @@ func buildCreateRateLimiter(
 		return nil
 	}
 
-	burst := cfg.RateLimitBurst
-	if burst <= 0 {
-		// Default burst = 2 × RPS so a legitimate client clicking
-		// "create" a couple of times in a row stays inside the
-		// budget. Floor at 1 so a fractional RPS like 0.5 still
-		// admits at least one request.
-		burst = max(int(cfg.RateLimitRPS*2), 1)
-	}
+	burst := effectiveBurst(cfg.RateLimitRPS, cfg.RateLimitBurst)
 
 	// Fixed window of 1 second: `burst` requests per second per IP.
 	const window = time.Second
@@ -99,4 +92,17 @@ func buildCreateRateLimiter(
 		"burst", burst,
 	)
 	return []func(http.Handler) http.Handler{mw}
+}
+
+// effectiveBurst returns the per-second token-bucket capacity given the
+// configured RPS and the (possibly zero) explicit burst. Zero or
+// negative configuredBurst falls back to 2×RPS, floored at 1 so a
+// fractional RPS (e.g. 0.5) still admits at least one request. Pure
+// function pulled out so the calculation can be unit-tested without
+// standing up a chi router.
+func effectiveBurst(rps float64, configuredBurst int) int {
+	if configuredBurst > 0 {
+		return configuredBurst
+	}
+	return max(int(rps*2), 1)
 }
