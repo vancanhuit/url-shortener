@@ -50,3 +50,21 @@ UPDATE links
 SET deleted_at = now()
 WHERE code = $1
   AND deleted_at IS NULL;
+
+-- name: PurgeExpiredAndDeleted :execresult
+-- Hard-delete rows that have been retired -- either soft-deleted or
+-- past their expires_at -- for at least the given grace interval.
+-- The grace window protects against rolling back a misclick: an
+-- operator has @grace_seconds to revive a row before this query
+-- removes it permanently.
+--
+-- The two predicates are independent: an expired-but-not-deleted
+-- row is purged once expires_at is older than the grace window;
+-- a deleted-but-never-expired row is purged once deleted_at is
+-- older than it. The deleted_at branch is the common case (the
+-- :code DELETE handler stamps deleted_at on every takedown);
+-- the expires_at branch handles links that were created with an
+-- expiry but never explicitly deleted.
+DELETE FROM links
+WHERE (deleted_at IS NOT NULL AND deleted_at < now() - make_interval(secs => sqlc.arg(grace_seconds)::float))
+   OR (expires_at IS NOT NULL AND expires_at < now() - make_interval(secs => sqlc.arg(grace_seconds)::float));

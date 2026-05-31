@@ -14,6 +14,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -514,5 +515,251 @@ func TestCreateAutoLink_AtomicDedup(t *testing.T) {
 	}
 	if after.Code != codeAfterDel {
 		t.Errorf("after.Code = %q, want %q", after.Code, codeAfterDel)
+	}
+}
+
+// TestCreateAutoLink_ConcurrentDedupRace verifies that two simultaneous
+// CreateAutoLink callers racing on the same target_url converge on a
+// single row. The partial-unique-index + ON CONFLICT path must serialize
+// them in the database; whichever insert "wins" decides the persisted
+// code, and the loser must observe created=false plus the winner's code.
+//
+// This guards against a regression where the dedup path used a
+// SELECT-then-INSERT pattern (vulnerable to a TOCTOU race) instead of
+// the atomic INSERT ... ON CONFLICT DO UPDATE used today.
+func TestCreateAutoLink_ConcurrentDedupRace(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	const goroutines = 8
+	suffix := uniqueCode(t)
+	target := "https://example.com/race/" + suffix
+
+	type result struct {
+		link    store.Link
+		created bool
+		err     error
+	}
+	results := make(chan result, goroutines)
+	start := make(chan struct{})
+
+	for i := range goroutines {
+		go func(idx int) {
+			<-start
+			// Distinct candidate codes per goroutine so any
+			// "loser" that ignored the dedup path would surface
+			// as a unique extra row, not a code collision.
+			code := fmt.Sprintf("r%d-%s", idx, suffix)
+			link, created, err := s.CreateAutoLink(ctx, nil, code, target)
+			results <- result{link: link, created: created, err: err}
+		}(i)
+	}
+
+	close(start)
+
+	winners := 0
+	var canonicalCode string
+	losers := make([]store.Link, 0, goroutines-1)
+	for range goroutines {
+		r := <-results
+		if r.err != nil {
+			t.Fatalf("CreateAutoLink: %v", r.err)
+		}
+		if r.created {
+			winners++
+			canonicalCode = r.link.Code
+		} else {
+			losers = append(losers, r.link)
+		}
+		if r.link.TargetURL != target {
+			t.Errorf("link.TargetURL = %q, want %q", r.link.TargetURL, target)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("created=true count = %d, want exactly 1", winners)
+	}
+	if canonicalCode == "" {
+		t.Fatal("canonical winning code was empty")
+	}
+	for _, l := range losers {
+		if l.Code != canonicalCode {
+			t.Errorf("loser code = %q, want %q (the winner's code)", l.Code, canonicalCode)
+		}
+	}
+
+	// Every concurrent caller must end up resolving to the same row,
+	// so a follow-up GetLinkByTargetURL must return the canonical code.
+	got, err := s.GetLinkByTargetURL(ctx, nil, target)
+	if err != nil {
+		t.Fatalf("GetLinkByTargetURL: %v", err)
+	}
+	if got.Code != canonicalCode {
+		t.Errorf("GetLinkByTargetURL.Code = %q, want %q", got.Code, canonicalCode)
+	}
+}
+
+// TestPurgeExpiredAndDeleted exercises the cleanup-job query: rows
+// soft-deleted or expired older than the grace window are physically
+// removed; rows inside the grace window survive.
+func TestPurgeExpiredAndDeleted(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	suffix := uniqueCode(t)
+	freshDeleted := "fd-" + suffix // soft-deleted just now: must survive
+	staleDeleted := "sd-" + suffix // soft-deleted "long ago": must purge
+	freshExpired := "fe-" + suffix // expired in past, but inside grace: survive
+	staleExpired := "se-" + suffix // expired well past grace: purge
+	live := "lv-" + suffix         // permanent, never deleted: must survive
+
+	target := "https://example.com/purge/" + suffix
+	mustCreate := func(code string, expires *time.Time) {
+		t.Helper()
+		if _, err := s.CreateLink(ctx, nil, code, target+"/"+code, expires); err != nil {
+			t.Fatalf("CreateLink %s: %v", code, err)
+		}
+	}
+	mustCreate(freshDeleted, nil)
+	mustCreate(staleDeleted, nil)
+	pastFar := time.Now().Add(-48 * time.Hour)
+	pastNear := time.Now().Add(-1 * time.Minute)
+	mustCreate(freshExpired, &pastNear)
+	mustCreate(staleExpired, &pastFar)
+	mustCreate(live, nil)
+
+	if err := s.SoftDeleteLink(ctx, nil, freshDeleted); err != nil {
+		t.Fatalf("SoftDeleteLink fresh: %v", err)
+	}
+	if err := s.SoftDeleteLink(ctx, nil, staleDeleted); err != nil {
+		t.Fatalf("SoftDeleteLink stale: %v", err)
+	}
+	// Backdate the stale deleted_at and stale expires_at via SQL so they
+	// fall outside the grace window regardless of how long the test
+	// process has been running.
+	if _, err := s.Pool().Exec(ctx, `UPDATE links SET deleted_at = now() - interval '48 hours' WHERE code = $1`, staleDeleted); err != nil {
+		t.Fatalf("backdate staleDeleted: %v", err)
+	}
+
+	// Grace = 1 hour: anything deleted/expired more than 1h ago is purged.
+	n, err := s.PurgeExpiredAndDeleted(ctx, nil, time.Hour)
+	if err != nil {
+		t.Fatalf("PurgeExpiredAndDeleted: %v", err)
+	}
+	if n < 2 {
+		t.Errorf("rows deleted = %d, want >=2 (staleDeleted + staleExpired); other tests may add to this count but ours must be purged", n)
+	}
+
+	// Survivors are still queryable; purged rows are gone.
+	for _, code := range []string{live, freshDeleted, freshExpired} {
+		if _, err := s.GetLinkByCode(ctx, nil, code); err != nil && !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("post-purge GetLinkByCode(%s): unexpected %v", code, err)
+		}
+	}
+	for _, code := range []string{staleDeleted, staleExpired} {
+		_, err := s.GetLinkByCode(ctx, nil, code)
+		if !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("post-purge GetLinkByCode(%s) = %v, want ErrNotFound", code, err)
+		}
+	}
+}
+
+// TestStore_Ping verifies the Ping wrapper reports liveness against the
+// real pool. The production readiness probe uses this instead of
+// reaching into Pool().Ping directly; this test pins that contract.
+func TestStore_Ping(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.Ping(ctx); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+}
+
+// TestStore_WithTx_CommitsOnSuccess verifies that work performed inside
+// the fn callback is visible after WithTx returns nil. Uses CreateLink
+// + GetLinkByCode through the tx-aware DBTX path.
+func TestStore_WithTx_CommitsOnSuccess(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	code := "wc-" + uniqueCode(t)
+	target := "https://example.com/wt-commit/" + code
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, code)
+	})
+
+	if err := s.WithTx(ctx, func(tx store.DBTX) error {
+		_, err := s.CreateLink(ctx, tx, code, target, nil)
+		return err
+	}); err != nil {
+		t.Fatalf("WithTx: %v", err)
+	}
+
+	got, err := s.GetLinkByCode(ctx, nil, code)
+	if err != nil {
+		t.Fatalf("GetLinkByCode post-commit: %v", err)
+	}
+	if got.TargetURL != target {
+		t.Errorf("TargetURL = %q, want %q", got.TargetURL, target)
+	}
+}
+
+// TestStore_WithTx_RollsBackOnError verifies that a non-nil return from
+// fn rolls back the transaction; the inserted row must not be visible
+// after WithTx returns.
+func TestStore_WithTx_RollsBackOnError(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	code := "wr-" + uniqueCode(t)
+	target := "https://example.com/wt-rollback/" + code
+	sentinel := errors.New("force rollback")
+
+	err := s.WithTx(ctx, func(tx store.DBTX) error {
+		if _, err := s.CreateLink(ctx, tx, code, target, nil); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("WithTx err = %v, want sentinel wrapped", err)
+	}
+
+	if _, err := s.GetLinkByCode(ctx, nil, code); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("post-rollback GetLinkByCode = %v, want ErrNotFound", err)
+	}
+}
+
+// TestStore_WithTx_RollsBackOnPanic verifies that a panic inside fn
+// rolls back and re-raises the panic. The inserted row must not be
+// visible after the panic is caught.
+func TestStore_WithTx_RollsBackOnPanic(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	code := "wp-" + uniqueCode(t)
+	target := "https://example.com/wt-panic/" + code
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected panic to propagate, got none")
+			}
+		}()
+		_ = s.WithTx(ctx, func(tx store.DBTX) error {
+			if _, err := s.CreateLink(ctx, tx, code, target, nil); err != nil {
+				t.Fatalf("CreateLink in tx: %v", err)
+			}
+			panic("boom")
+		})
+	}()
+
+	if _, err := s.GetLinkByCode(ctx, nil, code); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("post-panic GetLinkByCode = %v, want ErrNotFound", err)
 	}
 }

@@ -31,15 +31,14 @@ const (
 	idleTimeout       = 120 * time.Second
 	shutdownTimeout   = 15 * time.Second
 
-	// maxRequestBodyBytes caps the size of any single request body
-	// the server will accept. The largest legitimate payload is the
-	// JSON create-link request, which carries at most a 2 KiB
-	// target_url plus a small envelope; 16 KiB leaves an order of
-	// magnitude of headroom while still rejecting buggy or
-	// adversarial uploads early -- before the JSON decoder allocates
-	// against them. The HTML form route is also covered because the
-	// middleware runs before any handler-level decoding.
-	maxRequestBodyBytes = 16 * 1024
+	// defaultMaxRequestBodyBytes is the fallback cap on any single
+	// request body when config.MaxRequestBodyBytes is 0. See the
+	// MaxRequestBodyBytes doc comment in internal/config for the
+	// 16 KiB sizing rationale (largest legitimate payload is the JSON
+	// create-link request; 16 KiB leaves an order of magnitude of
+	// headroom while still rejecting buggy or adversarial uploads
+	// before the JSON decoder allocates against them).
+	defaultMaxRequestBodyBytes = 16 * 1024
 )
 
 // Deps groups the runtime dependencies the server needs. Every field is
@@ -94,7 +93,11 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	reqTotal, reqDuration := newRequestMetrics(reg)
 	r.Use(buildMetricsMiddleware(reqTotal, reqDuration))
 	// Cap request bodies before any handler reads them.
-	r.Use(bodyLimitMiddleware(maxRequestBodyBytes))
+	bodyLimit := cfg.MaxRequestBodyBytes
+	if bodyLimit <= 0 {
+		bodyLimit = defaultMaxRequestBodyBytes
+	}
+	r.Use(bodyLimitMiddleware(bodyLimit))
 	// Security headers on every response.
 	r.Use(buildSecureHeaders())
 	// CORS is opt-in via config; no-op when CORSAllowedOrigins is empty.
@@ -103,9 +106,7 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	}
 
 	op := handlers.NewOperational()
-	op.AddReadinessCheck("postgres", func(ctx context.Context) error {
-		return deps.Store.Pool().Ping(ctx)
-	})
+	op.AddReadinessCheck("postgres", deps.Store.Ping)
 	op.AddReadinessCheck("redis", deps.Cache.Ping)
 	op.Mount(r)
 	mountMetrics(r, reg)

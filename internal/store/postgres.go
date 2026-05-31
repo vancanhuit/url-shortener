@@ -214,10 +214,51 @@ func (s *Store) Close() {
 	}
 }
 
-// Pool returns the underlying connection pool, primarily so callers can begin
-// a transaction with pool.BeginTx and then pass the resulting pgx.Tx as the
-// DBTX argument to store methods.
+// Pool returns the underlying connection pool. Production callers should
+// prefer Ping for liveness checks and WithTx for atomic multi-statement
+// work; Pool is exposed so integration tests and ad-hoc admin scripts can
+// run raw SQL (e.g. DELETE for fixture cleanup) without growing the
+// store API for one-off operations.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
+// Ping checks the pool's liveness. It is the production-friendly
+// alternative to Pool().Ping when callers only need a readiness probe.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.pool.Ping(ctx)
+}
+
+// WithTx runs fn inside a database transaction. The transaction is
+// committed when fn returns nil and rolled back otherwise (including
+// when fn panics, in which case the panic is re-raised after rollback).
+// Pass the supplied DBTX to store methods so they share the transaction.
+//
+// WithTx is the preferred way for callers to compose multiple store
+// operations atomically without reaching into Pool() to manage the
+// transaction lifecycle themselves.
+func (s *Store) WithTx(ctx context.Context, fn func(DBTX) error) (err error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("store: begin tx: %w", err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			// Best-effort rollback; ignore its error so the
+			// original panic is not masked.
+			_ = tx.Rollback(ctx)
+			panic(p)
+		}
+		if err != nil {
+			if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+				err = errors.Join(err, fmt.Errorf("store: rollback: %w", rbErr))
+			}
+			return
+		}
+		if cmErr := tx.Commit(ctx); cmErr != nil {
+			err = fmt.Errorf("store: commit tx: %w", cmErr)
+		}
+	}()
+	return fn(tx)
+}
 
 // queriesFor returns a *db.Queries backed by dbtx when non-nil, otherwise
 // returns the store's own pool-backed Queries. This avoids allocating a
@@ -424,4 +465,23 @@ func (s *Store) SoftDeleteLink(ctx context.Context, dbtx DBTX, code string) erro
 		return ErrNotFound
 	}
 	return nil
+}
+
+// PurgeExpiredAndDeleted hard-deletes links that have been retired --
+// soft-deleted (deleted_at IS NOT NULL) or past their expires_at -- for
+// longer than the grace window. Negative or zero grace is rejected;
+// callers that want "purge everything retired right now" should pass
+// a small positive value (e.g. 1 second) explicitly so the operational
+// intent is in the audit log, not implicit.
+//
+// Returns the number of rows physically removed.
+func (s *Store) PurgeExpiredAndDeleted(ctx context.Context, dbtx DBTX, grace time.Duration) (int64, error) {
+	if grace <= 0 {
+		return 0, errors.New("store: purge grace must be > 0")
+	}
+	tag, err := s.queriesFor(dbtx).PurgeExpiredAndDeleted(ctx, grace.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("store: purge expired/deleted: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }

@@ -129,6 +129,16 @@ type Config struct {
 	// NegativeCacheTTL is how long a "not found / gone" answer for
 	// /r/:code is held in Redis. 0 uses the handler default (30s).
 	NegativeCacheTTL time.Duration `env:"URL_SHORTENER_NEGATIVE_CACHE_TTL" json:"negative_cache_ttl"`
+
+	// MaxRequestBodyBytes caps the size of any single HTTP request
+	// body the server will accept. The largest legitimate payload is
+	// the JSON create-link request (a ~2 KiB target_url plus envelope),
+	// so the default of 16 KiB leaves an order of magnitude of headroom
+	// while still rejecting buggy or adversarial uploads early --
+	// before the JSON decoder allocates against them. Values <= 0 mean
+	// "use the default"; explicit values let operators tighten or
+	// loosen the cap without rebuilding.
+	MaxRequestBodyBytes int64 `env:"URL_SHORTENER_MAX_REQUEST_BODY_BYTES" json:"max_request_body_bytes"`
 }
 
 // Load reads the configuration from environment variables and applies the
@@ -236,6 +246,10 @@ func (c Config) Validate() error {
 	}
 	if c.RateLimitBurst < 0 {
 		return fmt.Errorf("config: rate_limit_burst must be >= 0")
+	}
+
+	if c.MaxRequestBodyBytes < 0 {
+		return fmt.Errorf("config: max_request_body_bytes must be >= 0")
 	}
 
 	// CORS origins: each entry must be either the literal "*" or an
