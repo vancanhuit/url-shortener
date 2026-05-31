@@ -80,6 +80,18 @@ func TestBuildIPExtractor(t *testing.T) {
 				xff:        "203.0.113.42",
 				want:       "198.51.100.7",
 			},
+			{
+				name:       "trusted peer + malformed XFF -> RemoteAddr (XFF rejected)",
+				remoteAddr: "127.0.0.1:54321",
+				xff:        "not-an-ip",
+				want:       "127.0.0.1",
+			},
+			{
+				name:       "trusted peer + IPv6 XFF -> client from XFF",
+				remoteAddr: "127.0.0.1:54321",
+				xff:        "2001:db8::1",
+				want:       "2001:db8::1",
+			},
 		}
 
 		for _, tc := range cases {
