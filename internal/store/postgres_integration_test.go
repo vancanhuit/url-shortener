@@ -664,3 +664,102 @@ func TestPurgeExpiredAndDeleted(t *testing.T) {
 		}
 	}
 }
+
+// TestStore_Ping verifies the Ping wrapper reports liveness against the
+// real pool. The production readiness probe uses this instead of
+// reaching into Pool().Ping directly; this test pins that contract.
+func TestStore_Ping(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.Ping(ctx); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+}
+
+// TestStore_WithTx_CommitsOnSuccess verifies that work performed inside
+// the fn callback is visible after WithTx returns nil. Uses CreateLink
+// + GetLinkByCode through the tx-aware DBTX path.
+func TestStore_WithTx_CommitsOnSuccess(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	code := "wc-" + uniqueCode(t)
+	target := "https://example.com/wt-commit/" + code
+	t.Cleanup(func() {
+		_, _ = s.Pool().Exec(context.Background(), `DELETE FROM links WHERE code = $1`, code)
+	})
+
+	if err := s.WithTx(ctx, func(tx store.DBTX) error {
+		_, err := s.CreateLink(ctx, tx, code, target, nil)
+		return err
+	}); err != nil {
+		t.Fatalf("WithTx: %v", err)
+	}
+
+	got, err := s.GetLinkByCode(ctx, nil, code)
+	if err != nil {
+		t.Fatalf("GetLinkByCode post-commit: %v", err)
+	}
+	if got.TargetURL != target {
+		t.Errorf("TargetURL = %q, want %q", got.TargetURL, target)
+	}
+}
+
+// TestStore_WithTx_RollsBackOnError verifies that a non-nil return from
+// fn rolls back the transaction; the inserted row must not be visible
+// after WithTx returns.
+func TestStore_WithTx_RollsBackOnError(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	code := "wr-" + uniqueCode(t)
+	target := "https://example.com/wt-rollback/" + code
+	sentinel := errors.New("force rollback")
+
+	err := s.WithTx(ctx, func(tx store.DBTX) error {
+		if _, err := s.CreateLink(ctx, tx, code, target, nil); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("WithTx err = %v, want sentinel wrapped", err)
+	}
+
+	if _, err := s.GetLinkByCode(ctx, nil, code); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("post-rollback GetLinkByCode = %v, want ErrNotFound", err)
+	}
+}
+
+// TestStore_WithTx_RollsBackOnPanic verifies that a panic inside fn
+// rolls back and re-raises the panic. The inserted row must not be
+// visible after the panic is caught.
+func TestStore_WithTx_RollsBackOnPanic(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	code := "wp-" + uniqueCode(t)
+	target := "https://example.com/wt-panic/" + code
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected panic to propagate, got none")
+			}
+		}()
+		_ = s.WithTx(ctx, func(tx store.DBTX) error {
+			if _, err := s.CreateLink(ctx, tx, code, target, nil); err != nil {
+				t.Fatalf("CreateLink in tx: %v", err)
+			}
+			panic("boom")
+		})
+	}()
+
+	if _, err := s.GetLinkByCode(ctx, nil, code); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("post-panic GetLinkByCode = %v, want ErrNotFound", err)
+	}
+}

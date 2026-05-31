@@ -214,10 +214,51 @@ func (s *Store) Close() {
 	}
 }
 
-// Pool returns the underlying connection pool, primarily so callers can begin
-// a transaction with pool.BeginTx and then pass the resulting pgx.Tx as the
-// DBTX argument to store methods.
+// Pool returns the underlying connection pool. Production callers should
+// prefer Ping for liveness checks and WithTx for atomic multi-statement
+// work; Pool is exposed so integration tests and ad-hoc admin scripts can
+// run raw SQL (e.g. DELETE for fixture cleanup) without growing the
+// store API for one-off operations.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
+// Ping checks the pool's liveness. It is the production-friendly
+// alternative to Pool().Ping when callers only need a readiness probe.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.pool.Ping(ctx)
+}
+
+// WithTx runs fn inside a database transaction. The transaction is
+// committed when fn returns nil and rolled back otherwise (including
+// when fn panics, in which case the panic is re-raised after rollback).
+// Pass the supplied DBTX to store methods so they share the transaction.
+//
+// WithTx is the preferred way for callers to compose multiple store
+// operations atomically without reaching into Pool() to manage the
+// transaction lifecycle themselves.
+func (s *Store) WithTx(ctx context.Context, fn func(DBTX) error) (err error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("store: begin tx: %w", err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			// Best-effort rollback; ignore its error so the
+			// original panic is not masked.
+			_ = tx.Rollback(ctx)
+			panic(p)
+		}
+		if err != nil {
+			if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+				err = errors.Join(err, fmt.Errorf("store: rollback: %w", rbErr))
+			}
+			return
+		}
+		if cmErr := tx.Commit(ctx); cmErr != nil {
+			err = fmt.Errorf("store: commit tx: %w", cmErr)
+		}
+	}()
+	return fn(tx)
+}
 
 // queriesFor returns a *db.Queries backed by dbtx when non-nil, otherwise
 // returns the store's own pool-backed Queries. This avoids allocating a
