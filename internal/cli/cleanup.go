@@ -49,8 +49,12 @@ func newCleanupCmd() *cli.Command {
 			defer s.Close()
 
 			start := time.Now()
-			n, err := s.PurgeExpiredAndDeleted(ctx, s.Pool(), grace)
-			if err != nil {
+			var n int64
+			if err := s.WithTx(ctx, func(tx store.DBTX) error {
+				var err error
+				n, err = s.PurgeExpiredAndDeleted(ctx, tx, grace)
+				return err
+			}); err != nil {
 				return err
 			}
 			slog.New(slog.NewTextHandler(os.Stdout, nil)).Info("cleanup completed",

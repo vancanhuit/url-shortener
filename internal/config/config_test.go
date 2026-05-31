@@ -147,6 +147,7 @@ func TestValidate_RejectsBadDBPoolValues(t *testing.T) {
 		"negative healthchk": func(c *config.Config) { c.DBHealthCheckPeriod = -time.Second },
 		"negative rate rps":  func(c *config.Config) { c.RateLimitRPS = -1 },
 		"negative burst":     func(c *config.Config) { c.RateLimitBurst = -1 },
+		"negative body cap":  func(c *config.Config) { c.MaxRequestBodyBytes = -1 },
 		"cors origin without scheme": func(c *config.Config) {
 			c.CORSAllowedOrigins = []string{"example.com"}
 		},
