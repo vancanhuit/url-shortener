@@ -188,6 +188,35 @@ HSTS is only emitted when the request arrives over TLS (direct or via a
 proxy that sets `X-Forwarded-Proto: https`), so plain-HTTP deployments
 behind a reverse proxy are not affected.
 
+## SSRF protection
+
+Every `target_url` submitted to `POST /api/v1/links` is normalised and
+rejected if the resolved hostname is anything other than a routable
+public address. The handler refuses, with HTTP 400, any URL whose host
+is:
+
+- a literal IP address inside the IANA private-use ranges
+  (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`),
+  the loopback range (`127.0.0.0/8`, `::1`), link-local addresses
+  (`169.254.0.0/16`, `fe80::/10`), unique local IPv6 addresses
+  (`fc00::/7`), or the IANA shared address space / CGNAT block
+  (`100.64.0.0/10`);
+- the bare hostname `localhost` (case-insensitive) or an IPv6
+  link-local literal with a scope ID (`fe80::1%eth0`, bracketed
+  or unbracketed) — scope IDs are stripped before the link-local
+  range check fires; or
+- otherwise unparseable, missing a scheme, or using a scheme other than
+  `http`/`https`.
+
+DNS names other than `localhost` are **not** resolved at validation time:
+adding a per-request DNS lookup would both slow the create-link path and
+open the door to DNS rebinding (validate-time vs fetch-time mismatches).
+Operators concerned about hostname-based SSRF should pair this in-band
+check with outbound network policy at the pod / VM level.
+
+For full reporting instructions and the project threat model, see
+[SECURITY.md](SECURITY.md).
+
 ## API
 
 The full HTTP contract is described by an OpenAPI 3.0 document at
