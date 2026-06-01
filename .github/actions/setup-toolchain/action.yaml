@@ -13,10 +13,10 @@ inputs:
       (e.g. commitlint, openapi, web — jobs that never invoke the Go toolchain).
     required: false
     default: "true"
-  npm-cache:
+  pnpm-cache:
     description: >-
-      Whether to cache the npm download cache (~/.npm) between runs.
-      Set to "false" for jobs that never invoke Node/npm (e.g. govulncheck).
+      Whether to cache the pnpm content-addressable store (~/.local/share/pnpm/store) between runs.
+      Set to "false" for jobs that never invoke Node/pnpm (e.g. govulncheck).
     required: false
     default: "true"
 
@@ -41,11 +41,11 @@ runs:
         restore-keys: |
           go-${{ runner.os }}-
 
-    - name: Cache npm packages
-      if: ${{ inputs.npm-cache == 'true' }}
+    - name: Cache pnpm store
+      if: ${{ inputs.pnpm-cache == 'true' }}
       uses: actions/cache@v5
       with:
-        path: ~/.npm
-        key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+        path: ~/.local/share/pnpm/store
+        key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
         restore-keys: |
-          npm-${{ runner.os }}-
+          pnpm-${{ runner.os }}-

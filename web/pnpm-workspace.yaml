@@ -1,0 +1,6 @@
+allowBuilds:
+  '@nestjs/core': false
+  '@openapitools/openapi-generator-cli': false
+  '@scarf/scarf': false
+  core-js: false
+  esbuild: false

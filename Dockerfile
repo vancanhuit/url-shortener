@@ -9,6 +9,7 @@
 
 ARG GO_VERSION=1.26.3
 ARG NODE_VERSION=24.16.0
+ARG PNPM_VERSION=11.5.0
 
 # -----------------------------------------------------------------------------
 # Web-assets stage: build the Vite + Svelte SPA into web/dist/.
@@ -20,17 +21,20 @@ FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-trixie-slim AS web-builder
 
 WORKDIR /src/web
 
-# Cache npm install separately from the rest of the SPA source tree;
-# `package*.json` are the only files that gate the install.
-COPY web/package.json web/package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
+# Enable corepack and activate the pinned pnpm release.
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+
+# Cache pnpm install separately from the rest of the SPA source tree;
+# `package.json` and `pnpm-lock.yaml` are the only files that gate the install.
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 # Bring in everything Vite needs: SPA source, the index.html shell,
 # `public/` static-asset overrides, the vendor-docs-assets script,
 # tsconfig + svelte.config + vite.config.
 COPY web/ ./
-RUN npm run build
+RUN pnpm run build
 
 # -----------------------------------------------------------------------------
 # Builder stage: cross-compile the Go binary.

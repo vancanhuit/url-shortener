@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import ts from "typescript-eslint";
 import svelte from "eslint-plugin-svelte";
 import globals from "globals";
-import svelteConfig from "./svelte.config.js";
+import svelteConfig from "./svelte.config";
 
 export default ts.config(
   js.configs.recommended,
@@ -35,7 +35,7 @@ export default ts.config(
   },
   {
     // Config files and Node scripts run in Node, not the browser.
-    files: ["*.config.{js,ts}", "scripts/**/*.{js,mjs}"],
+    files: ["*.config.{js,ts}", "scripts/**/*.{js,mjs,ts}"],
     languageOptions: {
       globals: { ...globals.node },
     },

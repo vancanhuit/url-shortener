@@ -41,7 +41,7 @@ updates:
       actions-minor-and-patch:
         update-types: [minor, patch]
 
-  # Root npm tooling: husky + commitlint.
+  # Root pnpm tooling: husky + commitlint.
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -52,7 +52,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      npm-root-minor-and-patch:
+      pnpm-root-minor-and-patch:
         update-types: [minor, patch]
 
   # Vite + Svelte + Tailwind v4 SPA toolchain that produces the
@@ -67,7 +67,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      npm-web-minor-and-patch:
+      pnpm-web-minor-and-patch:
         update-types: [minor, patch]
 
   # Base images referenced by FROM ... in Dockerfile (golang, node,
