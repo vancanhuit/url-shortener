@@ -4,21 +4,17 @@
 // `dist/static/`. The Go server then serves dist/static/* at
 // /static/* alongside the SPA's hashed bundles.
 //
-// Run automatically on every `npm run build` via the `prebuild`
+// Run automatically on every `pnpm run build` via the `prebuild`
 // script; safe to invoke directly during development.
 import { copyFileSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const webRoot = resolve(__dirname, "..");
+const webRoot = resolve(import.meta.dirname, "..");
 const publicStatic = resolve(webRoot, "public/static");
 
 mkdirSync(publicStatic, { recursive: true });
 
-/** @type {[string, string][]} */
-const assets = [
+const assets: [string, string][] = [
   ["swagger-ui-dist/swagger-ui.css", "swagger-ui.css"],
   ["swagger-ui-dist/swagger-ui-bundle.js", "swagger-ui-bundle.js"],
   ["swagger-ui-dist/swagger-ui-standalone-preset.js", "swagger-ui-standalone-preset.js"],

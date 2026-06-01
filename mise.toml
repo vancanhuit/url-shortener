@@ -7,10 +7,11 @@ golangci-lint = "2.11.4"
 trivy = "0.70.0"
 git-cliff = "2.13.1"
 mkcert = "1.4.4"
+pnpm = "11.5.0"
 
 [tasks.init]
 description = "One-time bootstrap: install Node devDependencies (husky + commitlint)."
-run = "npm ci"
+run = "pnpm install --frozen-lockfile"
 
 [tasks.test]
 description = "Run all unit tests with verbose output and per-package coverage."
@@ -31,11 +32,11 @@ run = "go tool oapi-codegen -config api/cfg.yaml api/openapi.yaml"
 [tasks.lint-openapi]
 description = "Lint the OpenAPI spec with Spectral. Requires `mise run init` first."
 depends = ["init"]
-run = "npm run lint:openapi"
+run = "pnpm run lint:openapi"
 
 [tasks.commitlint-last]
 description = "Lint just the most recent commit message."
-run = "npx --no -- commitlint --from=HEAD~1 --to=HEAD"
+run = "pnpm exec commitlint --from=HEAD~1 --to=HEAD"
 
 [tasks.down]
 description = "Tear down the dev stack and remove volumes."
@@ -46,54 +47,54 @@ description = "Tear down the TLS stack and remove volumes."
 run = "docker compose --profile=tls down $@"
 
 [tasks.web-install]
-description = "Install npm deps for the web SPA toolchain (idempotent)."
+description = "Install pnpm deps for the web SPA toolchain (idempotent)."
 dir = "web"
-run = "npm ci"
+run = "pnpm install --frozen-lockfile"
 
 [tasks.web-generate]
 description = "Regenerate web/src/lib/generated/ from api/openapi.yaml. Requires Java."
 dir = "web"
 depends = ["web-install"]
-run = "npm run generate"
+run = "pnpm run generate"
 
 [tasks.web-build]
 description = "Build the Vite + Svelte SPA into web/dist/."
 dir = "web"
 depends = ["web-install"]
-run = "npm run build"
+run = "pnpm run build"
 
 [tasks.web-dev]
 description = "Vite dev server with HMR. Run `mise run up` in another terminal first."
 dir = "web"
 depends = ["web-install"]
-run = "npm run dev"
+run = "pnpm run dev"
 
 [tasks.web-check]
 description = "Run svelte-check + tsc against the SPA."
 dir = "web"
 depends = ["web-install"]
-run = "npm run check"
+run = "pnpm run check"
 
 [tasks.web-fmt]
 description = "Format the web SPA with Prettier (writes files in-place)."
 dir = "web"
 depends = ["web-install"]
-run = "npm run fmt"
+run = "pnpm run fmt"
 
 [tasks.web-fmt-check]
 description = "Check web SPA formatting with Prettier (fails on diff; used by CI)."
 dir = "web"
 depends = ["web-install"]
-run = "npm run fmt:check"
+run = "pnpm run fmt:check"
 
 [tasks.web-lint]
 description = "Lint the web SPA with ESLint."
 dir = "web"
 depends = ["web-install"]
-run = "npm run lint:js"
+run = "pnpm run lint:js"
 
 [tasks.web-test]
 description = "Run the web SPA unit tests."
 dir = "web"
 depends = ["web-install"]
-run = "npm run test"
+run = "pnpm run test"

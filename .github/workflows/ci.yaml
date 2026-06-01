@@ -42,7 +42,7 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # commitlint runs `mise run init`, which `npm ci`s the root toolchain
+      # commitlint runs `mise run init`, which `pnpm install`s the root toolchain
       # (husky + @commitlint/*). Skip the Go module cache since this job
       # never invokes the Go toolchain.
       - uses: ./.github/actions/setup-toolchain
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-      # `mise run build` depends on `web-build`, which `npm ci`s the
+      # `mise run build` depends on `web-build`, which `pnpm install`s the
       # Vite + Svelte SPA toolchain in web/ and emits .gitignore'd
       # build artifacts under web/dist/ that the Go binary embeds.
       - uses: ./.github/actions/setup-toolchain
@@ -87,7 +87,7 @@ jobs:
     name: openapi (spectral)
     # Lint the OpenAPI 3.0 document at api/openapi.yaml using Spectral.
     # Spectral lives in package.json's devDependencies and is invoked
-    # via `mise run lint-openapi`, which calls the `lint:openapi` npm
+      # via `mise run lint-openapi`, which calls the `lint:openapi` pnpm
     # script with the project ruleset (.spectral.yaml). A drift
     # between the served spec and the code is caught by the Go unit
     # + integration tests in the `go` / `go-integration` jobs; this
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/setup-toolchain
         with:
-          npm-cache: "false"
+          pnpm-cache: "false"
       # `mise run govulncheck` self-installs govulncheck@latest into $GOPATH/bin
       # and runs it with --build-tags=integration so the entire codebase
       # (including //go:build integration tests) is analysed for
@@ -165,7 +165,7 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # `mise run trivy-image` calls `mise run docker-build` (the Dockerfile's
-      # own builder stages handle Go + npm). trivy is managed by mise and
+      # own builder stages handle Go + pnpm). trivy is managed by mise and
       # available on PATH — no separate install step required.
       - uses: jdx/mise-action@v4
         with:
@@ -192,7 +192,7 @@ jobs:
         with:
           fetch-depth: 0
       # Same toolchain setup as the `go` job: `mise run test-integration`
-      # depends on `build`, which depends on `web-build` (npm ci).
+      # depends on `build`, which depends on `web-build` (pnpm install).
       - uses: ./.github/actions/setup-toolchain
       # `mise run test-integration` brings up the `test`-profile infra
       # (db-test on 5433 + redis-test on 6380), builds the binary, applies
