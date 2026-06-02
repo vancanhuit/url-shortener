@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 #
 # Multi-stage, multi-arch (linux/amd64, linux/arm64) build for url-shortener.
 #
@@ -21,14 +21,14 @@ FROM --platform=$BUILDPLATFORM debian:trixie-slim AS builder
 
 # OS prerequisites for mise itself (downloads + extracts tarballs) and for
 # fetching Go modules. Cleaning the apt list saves a few MB in the layer.
-RUN apt-get update \
-    && apt-get install --no-install-recommends -y \
-        ca-certificates \
-        curl \
-        git \
-        xz-utils \
-        bash \
-    && rm -rf /var/lib/apt/lists/*
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+  && apt-get install --no-install-recommends -y \
+  ca-certificates \
+  curl \
+  git \
+  xz-utils \
+  bash \
+  && rm -rf /var/lib/apt/lists/*
 
 # Install mise into /usr/local/bin via the official installer
 # (https://mise.jdx.dev/installing-mise.html). MISE_VERSION pins the release
@@ -36,7 +36,7 @@ RUN apt-get update \
 # move is needed.
 ARG MISE_VERSION
 RUN curl -fsSL https://mise.run | \
-    MISE_VERSION=v${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh
+  MISE_VERSION=v${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh
 
 # Activate mise's shims so subsequent RUN steps find go, bun, etc. on PATH.
 ENV MISE_DATA_DIR=/root/.local/share/mise
@@ -51,9 +51,9 @@ WORKDIR /src
 # tarballs across builds.
 COPY mise.toml ./
 RUN --mount=type=cache,target=/root/.cache/mise \
-    mise trust mise.toml \
-    && mise install \
-    && mise reshim
+  mise trust mise.toml \
+  && mise install \
+  && mise reshim
 
 # -----------------------------------------------------------------------------
 # Web-assets sub-step: build the Vite + Svelte SPA into web/dist/.
@@ -66,7 +66,7 @@ WORKDIR /src/web
 # package.json and bun.lock are the only files that gate the install.
 COPY web/package.json web/bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile
+  bun install --frozen-lockfile
 
 # Bring in everything Vite needs: SPA source, the index.html shell,
 # public/ static-asset overrides, the vendor-docs-assets script,
@@ -91,8 +91,8 @@ ARG DATE=1970-01-01T00:00:00Z
 # Cache module downloads in a separate layer from the source copy.
 COPY go.mod go.sum* ./
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go mod download
+  --mount=type=cache,target=/root/.cache/go-build \
+  go mod download
 
 # Copy the rest of the Go source tree. web/dist/ is already populated
 # in-place from the previous step, so the //go:embed directive finds it
@@ -100,16 +100,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build \
-        -trimpath \
-        -ldflags="-s -w \
-            -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=${VERSION} \
-            -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit=${COMMIT} \
-            -X github.com/vancanhuit/url-shortener/internal/buildinfo.date=${DATE}" \
-        -o /out/url-shortener \
-        ./cmd/url-shortener
+  --mount=type=cache,target=/root/.cache/go-build \
+  CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+  go build \
+  -trimpath \
+  -ldflags="-s -w \
+  -X github.com/vancanhuit/url-shortener/internal/buildinfo.version=${VERSION} \
+  -X github.com/vancanhuit/url-shortener/internal/buildinfo.commit=${COMMIT} \
+  -X github.com/vancanhuit/url-shortener/internal/buildinfo.date=${DATE}" \
+  -o /out/url-shortener \
+  ./cmd/url-shortener
 
 # -----------------------------------------------------------------------------
 # Runtime stage: distroless static, nonroot.
@@ -121,12 +121,12 @@ FROM gcr.io/distroless/static-debian13:nonroot
 # fixed identity here means `docker build` outside CI inherits them
 # too. See https://github.com/opencontainers/image-spec/blob/main/annotations.md
 LABEL org.opencontainers.image.title="url-shortener" \
-      org.opencontainers.image.description="A small URL-shortener service with a JSON API and Svelte web UI." \
-      org.opencontainers.image.source="https://github.com/vancanhuit/url-shortener" \
-      org.opencontainers.image.url="https://github.com/vancanhuit/url-shortener" \
-      org.opencontainers.image.documentation="https://github.com/vancanhuit/url-shortener#readme" \
-      org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.vendor="vancanhuit"
+  org.opencontainers.image.description="A small URL-shortener service with a JSON API and Svelte web UI." \
+  org.opencontainers.image.source="https://github.com/vancanhuit/url-shortener" \
+  org.opencontainers.image.url="https://github.com/vancanhuit/url-shortener" \
+  org.opencontainers.image.documentation="https://github.com/vancanhuit/url-shortener#readme" \
+  org.opencontainers.image.licenses="MIT" \
+  org.opencontainers.image.vendor="vancanhuit"
 
 WORKDIR /app
 
@@ -143,6 +143,6 @@ USER nonroot:nonroot
 # other orchestrators that drive their own probes can override this
 # with their own livenessProbe.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/url-shortener", "healthcheck"]
+  CMD ["/usr/local/bin/url-shortener", "healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/url-shortener"]
