@@ -132,8 +132,8 @@ func (h *Links) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if hit {
-		h.recordClick(code) //nolint:contextcheck // goroutine outlives the request; uses its own timeout context
-		http.Redirect(w, r, target, http.StatusFound)
+		h.recordClick(code)                           //nolint:contextcheck // goroutine outlives the request; uses its own timeout context
+		http.Redirect(w, r, target, http.StatusFound) //nolint:gosec // target is populated exclusively from DB-validated URLs (http/https, non-private hosts); the cache is internal, not user-controlled
 		return
 	}
 

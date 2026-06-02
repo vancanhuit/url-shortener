@@ -64,7 +64,15 @@ url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.
 checksum = "sha256:200d2535da6d9703f3bcc8a4d159c3b55eacdb01cf2148c55b3eee9dd04d5249"
 url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz"
 
+[tools.git-cliff."platforms.linux-x64-baseline"]
+checksum = "sha256:200d2535da6d9703f3bcc8a4d159c3b55eacdb01cf2148c55b3eee9dd04d5249"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz"
+
 [tools.git-cliff."platforms.linux-x64-musl"]
+checksum = "sha256:200d2535da6d9703f3bcc8a4d159c3b55eacdb01cf2148c55b3eee9dd04d5249"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz"
+
+[tools.git-cliff."platforms.linux-x64-musl-baseline"]
 checksum = "sha256:200d2535da6d9703f3bcc8a4d159c3b55eacdb01cf2148c55b3eee9dd04d5249"
 url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz"
 
@@ -76,7 +84,15 @@ url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.
 checksum = "sha256:6e60ae390d375cecb9d8008c49f0e724a8dfe40390b532ef5501e421d2cc8acb"
 url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-apple-darwin.tar.gz"
 
+[tools.git-cliff."platforms.macos-x64-baseline"]
+checksum = "sha256:6e60ae390d375cecb9d8008c49f0e724a8dfe40390b532ef5501e421d2cc8acb"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-apple-darwin.tar.gz"
+
 [tools.git-cliff."platforms.windows-x64"]
+checksum = "sha256:3ae3a5549e85c7ad5b20192ebcfee4371269deca51255f6f2f2e051c6541f5ca"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-pc-windows-msvc.zip"
+
+[tools.git-cliff."platforms.windows-x64-baseline"]
 checksum = "sha256:3ae3a5549e85c7ad5b20192ebcfee4371269deca51255f6f2f2e051c6541f5ca"
 url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-pc-windows-msvc.zip"
 
@@ -96,7 +112,15 @@ url = "https://dl.google.com/go/go1.26.3.linux-arm64.tar.gz"
 checksum = "sha256:2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556"
 url = "https://dl.google.com/go/go1.26.3.linux-amd64.tar.gz"
 
+[tools.go."platforms.linux-x64-baseline"]
+checksum = "sha256:2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556"
+url = "https://dl.google.com/go/go1.26.3.linux-amd64.tar.gz"
+
 [tools.go."platforms.linux-x64-musl"]
+checksum = "sha256:2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556"
+url = "https://dl.google.com/go/go1.26.3.linux-amd64.tar.gz"
+
+[tools.go."platforms.linux-x64-musl-baseline"]
 checksum = "sha256:2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556"
 url = "https://dl.google.com/go/go1.26.3.linux-amd64.tar.gz"
 
@@ -108,80 +132,124 @@ url = "https://dl.google.com/go/go1.26.3.darwin-arm64.tar.gz"
 checksum = "sha256:278d580b32e299fe4a9c990fcf2d02acfe538c7e551a6ee18f9c7164573d2c63"
 url = "https://dl.google.com/go/go1.26.3.darwin-amd64.tar.gz"
 
+[tools.go."platforms.macos-x64-baseline"]
+checksum = "sha256:278d580b32e299fe4a9c990fcf2d02acfe538c7e551a6ee18f9c7164573d2c63"
+url = "https://dl.google.com/go/go1.26.3.darwin-amd64.tar.gz"
+
 [tools.go."platforms.windows-x64"]
 checksum = "sha256:20d2ceafb4ed41b96b879010927b28bc92a5be57a7c1801ce365a9ca51d3224a"
 url = "https://dl.google.com/go/go1.26.3.windows-amd64.zip"
 
+[tools.go."platforms.windows-x64-baseline"]
+checksum = "sha256:20d2ceafb4ed41b96b879010927b28bc92a5be57a7c1801ce365a9ca51d3224a"
+url = "https://dl.google.com/go/go1.26.3.windows-amd64.zip"
+
 [[tools.golangci-lint]]
-version = "2.11.4"
+version = "2.12.2"
 backend = "aqua:golangci/golangci-lint"
 
 [tools.golangci-lint."platforms.linux-arm64"]
-checksum = "sha256:3bcfa2e6f3d32b2bf5cd75eaa876447507025e0303698633f722a05331988db4"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-linux-arm64.tar.gz"
+checksum = "sha256:44cd40a8c76c86755375adfeea52cfd3533cb43d7bd647771e0ae065e166df3a"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-arm64.tar.gz"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-arm64-musl"]
-checksum = "sha256:3bcfa2e6f3d32b2bf5cd75eaa876447507025e0303698633f722a05331988db4"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-linux-arm64.tar.gz"
+checksum = "sha256:44cd40a8c76c86755375adfeea52cfd3533cb43d7bd647771e0ae065e166df3a"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-arm64.tar.gz"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-x64"]
-checksum = "sha256:200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-linux-amd64.tar.gz"
+checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.linux-x64-baseline"]
+checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-x64-musl"]
-checksum = "sha256:200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-linux-amd64.tar.gz"
+checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.macos-arm64"]
-checksum = "sha256:02db2a2dae8b26812e53b0688a6f617e3ef1f489790e829ea22862cf76945675"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-darwin-arm64.tar.gz"
+checksum = "sha256:a9c54498731b3128f79e090be6110f3e5fffccc617b08142ed244d4126c73f29"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-darwin-arm64.tar.gz"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.macos-x64"]
-checksum = "sha256:c900d4048db75d1edfd550fd11cf6a9b3008e7caa8e119fcddbc700412d63e60"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-darwin-amd64.tar.gz"
+checksum = "sha256:f6f06d94b6241521c53d15450c5209b028270bf966f842afb11c030c79f5bc16"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-darwin-amd64.tar.gz"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.macos-x64-baseline"]
+checksum = "sha256:f6f06d94b6241521c53d15450c5209b028270bf966f842afb11c030c79f5bc16"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-darwin-amd64.tar.gz"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.windows-x64"]
-checksum = "sha256:4932cfca5e75bf60fe1c576edf459e5e809e6644664a068185d64b84af3fad9e"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-windows-amd64.zip"
+checksum = "sha256:bd42e3ebc8cb4ececb86941983baaf1dc221bbb04d838e94ce63b49cc91e02bb"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-windows-amd64.zip"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.windows-x64-baseline"]
+checksum = "sha256:bd42e3ebc8cb4ececb86941983baaf1dc221bbb04d838e94ce63b49cc91e02bb"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-windows-amd64.zip"
 provenance = "github-attestations"
 
 [[tools.java]]
-version = "temurin-21.0.11+10.0.LTS"
+version = "temurin-25.0.3+9.0.LTS"
 backend = "core:java"
 
 [tools.java."platforms.linux-arm64"]
-checksum = "sha256:8d498ec88e1c1989fab95c6784240ab92d011e29c54d20a3f9c324b13476f9ad"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.11_10.tar.gz"
+checksum = "sha256:3e4287cb98870ba824ed698854bdc27cff984254caf66dd12cc291e7bfdde26b"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_aarch64_linux_hotspot_25.0.3_9.tar.gz"
 
 [tools.java."platforms.linux-arm64-musl"]
-checksum = "sha256:c8d63598d1dc0a656033515ed258bd6db37506a05407d9f65cd23b95c21027b5"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_aarch64_alpine-linux_hotspot_21.0.11_10.tar.gz"
+checksum = "sha256:6ed368e93049d3b188c045fce0b20953bbea92fe0614dbbf4d3fd8daad7be3b2"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_aarch64_alpine-linux_hotspot_25.0.3_9.tar.gz"
 
 [tools.java."platforms.linux-x64"]
-checksum = "sha256:4b2220e232a97997b436ca6ab15cbf70171ecff52958a46159dfa5a8c44ca4de"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_x64_linux_hotspot_21.0.11_10.tar.gz"
+checksum = "sha256:69264a7a211bf5029830d07bc3370f879769d62ebc5b5488e90c9343a2da0e1f"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_linux_hotspot_25.0.3_9.tar.gz"
+
+[tools.java."platforms.linux-x64-baseline"]
+checksum = "sha256:69264a7a211bf5029830d07bc3370f879769d62ebc5b5488e90c9343a2da0e1f"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_linux_hotspot_25.0.3_9.tar.gz"
 
 [tools.java."platforms.linux-x64-musl"]
-checksum = "sha256:38bfdcef1e4b45de2ec222047ac79c76bea75d4d7406a310e26cfa236763f05f"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_x64_alpine-linux_hotspot_21.0.11_10.tar.gz"
+checksum = "sha256:51c2415b370aac7c3796b0c4663c8fcf91bc22d76f03df95b25fa5667cb5fdd8"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_alpine-linux_hotspot_25.0.3_9.tar.gz"
+
+[tools.java."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:51c2415b370aac7c3796b0c4663c8fcf91bc22d76f03df95b25fa5667cb5fdd8"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_alpine-linux_hotspot_25.0.3_9.tar.gz"
 
 [tools.java."platforms.macos-arm64"]
-checksum = "sha256:6ebcf221c9b41507b14c098e93c6ead6440b8d9bd154f8ec666c4c73abbdb201"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.11_10.tar.gz"
+checksum = "sha256:7baab4d69a15554e119b86ff78d40e3fdc28819b5b322955c913cebfe3f6a37c"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.3_9.tar.gz"
 
 [tools.java."platforms.macos-x64"]
-checksum = "sha256:34180eb03e6d207c388cce3da668f6cc7cd7508c185c24782fadac2c9c0e66f9"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_x64_mac_hotspot_21.0.11_10.tar.gz"
+checksum = "sha256:4c539a18b4d656960ff6766727e9ca546fc17f7a29714dba9e7b47bdcb37c447"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_mac_hotspot_25.0.3_9.tar.gz"
+
+[tools.java."platforms.macos-x64-baseline"]
+checksum = "sha256:4c539a18b4d656960ff6766727e9ca546fc17f7a29714dba9e7b47bdcb37c447"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_mac_hotspot_25.0.3_9.tar.gz"
 
 [tools.java."platforms.windows-x64"]
-checksum = "sha256:d3625e7cadf23787ea540229544b6e2ab494b3b54da1801879e583e1dfee0a64"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_x64_windows_hotspot_21.0.11_10.zip"
+checksum = "sha256:709312cd0420296d9b9de917fe6e28a5b979e875ee5ab91783fb79bcd5857235"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_windows_hotspot_25.0.3_9.zip"
+
+[tools.java."platforms.windows-x64-baseline"]
+checksum = "sha256:709312cd0420296d9b9de917fe6e28a5b979e875ee5ab91783fb79bcd5857235"
+url = "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_x64_windows_hotspot_25.0.3_9.zip"
 
 [[tools.mkcert]]
 version = "1.4.4"
@@ -197,7 +265,13 @@ url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.
 checksum = "blake3:2337bf318a54e40d6fb36ee89306f031fcecc00e02dad69afa2bc2b579959f80"
 url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
 
+[tools.mkcert."platforms.linux-x64-baseline"]
+url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
+
 [tools.mkcert."platforms.linux-x64-musl"]
+url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
+
+[tools.mkcert."platforms.linux-x64-musl-baseline"]
 url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
 
 [tools.mkcert."platforms.macos-arm64"]
@@ -206,44 +280,70 @@ url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.
 [tools.mkcert."platforms.macos-x64"]
 url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-darwin-amd64"
 
+[tools.mkcert."platforms.macos-x64-baseline"]
+url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-darwin-amd64"
+
 [tools.mkcert."platforms.windows-x64"]
 url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe"
 
+[tools.mkcert."platforms.windows-x64-baseline"]
+url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe"
+
 [[tools.trivy]]
-version = "0.70.0"
+version = "0.71.0"
 backend = "aqua:aquasecurity/trivy"
 
 [tools.trivy."platforms.linux-arm64"]
-checksum = "sha256:2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d"
-url = "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_Linux-ARM64.tar.gz"
+checksum = "sha256:2561be394a3199c911f82fced606cbc05e1cb23eb6ce1da6935540adb76f4252"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_Linux-ARM64.tar.gz"
 provenance = "cosign"
 
 [tools.trivy."platforms.linux-arm64-musl"]
-checksum = "sha256:2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d"
-url = "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_Linux-ARM64.tar.gz"
+checksum = "sha256:2561be394a3199c911f82fced606cbc05e1cb23eb6ce1da6935540adb76f4252"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_Linux-ARM64.tar.gz"
 provenance = "cosign"
 
 [tools.trivy."platforms.linux-x64"]
-checksum = "sha256:8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
-url = "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_Linux-64bit.tar.gz"
+checksum = "sha256:30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_Linux-64bit.tar.gz"
+provenance = "cosign"
+
+[tools.trivy."platforms.linux-x64-baseline"]
+checksum = "sha256:30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_Linux-64bit.tar.gz"
 provenance = "cosign"
 
 [tools.trivy."platforms.linux-x64-musl"]
-checksum = "sha256:8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
-url = "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_Linux-64bit.tar.gz"
+checksum = "sha256:30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_Linux-64bit.tar.gz"
+provenance = "cosign"
+
+[tools.trivy."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_Linux-64bit.tar.gz"
 provenance = "cosign"
 
 [tools.trivy."platforms.macos-arm64"]
-checksum = "sha256:68e543c51dcc96e1c344053a4fde9660cf602c25565d9f09dc17dd41e13b838a"
-url = "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_macOS-ARM64.tar.gz"
+checksum = "sha256:95d4e896b120816edd0995a2df8adca26a8621b7bf62036a89b1d54a7b718a74"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_macOS-ARM64.tar.gz"
 provenance = "cosign"
 
 [tools.trivy."platforms.macos-x64"]
-checksum = "sha256:52d531452b19e7593da29366007d02a810e1e0080d02f9cf6a1afb46c35aaa93"
-url = "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_macOS-64bit.tar.gz"
+checksum = "sha256:4558afb13d017615ca85011901caab78b4f09196e320b05a56c9fdc5615a1428"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_macOS-64bit.tar.gz"
+provenance = "cosign"
+
+[tools.trivy."platforms.macos-x64-baseline"]
+checksum = "sha256:4558afb13d017615ca85011901caab78b4f09196e320b05a56c9fdc5615a1428"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_macOS-64bit.tar.gz"
 provenance = "cosign"
 
 [tools.trivy."platforms.windows-x64"]
-checksum = "sha256:eea5442eab86f9e26cd718d7618d43899e72a83767619e8bee47911bddbfb825"
-url = "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_windows-64bit.zip"
+checksum = "sha256:382250158fb9431ff9b87904205027b066a544234b8952b2dd764bd712d55387"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_windows-64bit.zip"
+provenance = "cosign"
+
+[tools.trivy."platforms.windows-x64-baseline"]
+checksum = "sha256:382250158fb9431ff9b87904205027b066a544234b8952b2dd764bd712d55387"
+url = "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_windows-64bit.zip"
 provenance = "cosign"
