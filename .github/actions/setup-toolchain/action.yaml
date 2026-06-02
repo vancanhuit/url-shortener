@@ -1,6 +1,6 @@
 name: Set up toolchain
 description: >-
-  Install the Go, Node, and Java toolchains used by every build/test/release
+  Install the Go, Bun, and Java toolchains used by every build/test/release
   job via mise (versions declared in mise.toml). Centralizes the action
   versions, cache config, and Node-24 opt-in so workflow jobs stay focused
   on what they actually run.
@@ -13,17 +13,17 @@ inputs:
       (e.g. commitlint, openapi, web — jobs that never invoke the Go toolchain).
     required: false
     default: "true"
-  pnpm-cache:
+  bun-cache:
     description: >-
-      Whether to cache the pnpm content-addressable store (~/.local/share/pnpm/store) between runs.
-      Set to "false" for jobs that never invoke Node/pnpm (e.g. govulncheck).
+      Whether to cache the Bun install cache (~/.bun/install/cache) between runs.
+      Set to "false" for jobs that never invoke Bun (e.g. govulncheck).
     required: false
     default: "true"
 
 runs:
   using: composite
   steps:
-    # Install mise and all tools declared in mise.toml (go, node, java).
+    # Install mise and all tools declared in mise.toml (go, bun, java).
     # cache: true (the default) stores ~/.local/share/mise/installs in GitHub's
     # cache so binaries are not re-downloaded on subsequent runs.
     - uses: jdx/mise-action@v4
@@ -41,11 +41,11 @@ runs:
         restore-keys: |
           go-${{ runner.os }}-
 
-    - name: Cache pnpm store
-      if: ${{ inputs.pnpm-cache == 'true' }}
+    - name: Cache Bun install
+      if: ${{ inputs.bun-cache == 'true' }}
       uses: actions/cache@v5
       with:
-        path: ~/.local/share/pnpm/store
-        key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
         restore-keys: |
-          pnpm-${{ runner.os }}-
+          bun-${{ runner.os }}-

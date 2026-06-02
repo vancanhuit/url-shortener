@@ -173,7 +173,7 @@ jobs:
           fetch-depth: 0
 
       # `mise run release-binaries` depends on `mise run web-build`, which runs
-      # `pnpm install` in web/. Same composite as ci.yaml.
+      # `bun install` in web/. Same composite as ci.yaml.
       - uses: ./.github/actions/setup-toolchain
 
       # The task reads VERSION from `git describe --tags`, which on a

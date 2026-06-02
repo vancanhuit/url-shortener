@@ -4,7 +4,7 @@ Thanks for taking the time to contribute!
 
 ## Development workflow
 
-1. Install prerequisites: Go 1.26+, Node.js 24+, [mise](https://mise.jdx.dev/), `golangci-lint` v2.
+1. Install prerequisites: Go 1.26+, Bun 1.3+, [mise](https://mise.jdx.dev/), `golangci-lint` v2.
    Run `mise install` to install all tools at the versions pinned in `mise.toml`.
 2. Bootstrap dev tooling once per clone:
    ```sh

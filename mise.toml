@@ -1,17 +1,16 @@
 [tools]
 go = "1.26.3"
-node = "24.16.0"
+bun = "1.3.14"
 # JDK for @openapitools/openapi-generator-cli (used by `mise run web-generate`).
 java = "temurin-21"
 golangci-lint = "2.11.4"
 trivy = "0.70.0"
 git-cliff = "2.13.1"
 mkcert = "1.4.4"
-pnpm = "11.5.0"
 
 [tasks.init]
-description = "One-time bootstrap: install Node devDependencies (husky + commitlint)."
-run = "pnpm install --frozen-lockfile"
+description = "One-time bootstrap: install Bun devDependencies (husky + commitlint)."
+run = "bun install --frozen-lockfile"
 
 [tasks.test]
 description = "Run all unit tests with verbose output and per-package coverage."
@@ -32,11 +31,11 @@ run = "go tool oapi-codegen -config api/cfg.yaml api/openapi.yaml"
 [tasks.lint-openapi]
 description = "Lint the OpenAPI spec with Spectral. Requires `mise run init` first."
 depends = ["init"]
-run = "pnpm run lint:openapi"
+run = "bun run lint:openapi"
 
 [tasks.commitlint-last]
 description = "Lint just the most recent commit message."
-run = "pnpm exec commitlint --from=HEAD~1 --to=HEAD"
+run = "bunx commitlint --from=HEAD~1 --to=HEAD"
 
 [tasks.down]
 description = "Tear down the dev stack and remove volumes."
@@ -47,54 +46,54 @@ description = "Tear down the TLS stack and remove volumes."
 run = "docker compose --profile=tls down $@"
 
 [tasks.web-install]
-description = "Install pnpm deps for the web SPA toolchain (idempotent)."
+description = "Install Bun deps for the web SPA toolchain (idempotent)."
 dir = "web"
-run = "pnpm install --frozen-lockfile"
+run = "bun install --frozen-lockfile"
 
 [tasks.web-generate]
 description = "Regenerate web/src/lib/generated/ from api/openapi.yaml. Requires Java."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run generate"
+run = "bun run generate"
 
 [tasks.web-build]
 description = "Build the Vite + Svelte SPA into web/dist/."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run build"
+run = "bun run build"
 
 [tasks.web-dev]
 description = "Vite dev server with HMR. Run `mise run up` in another terminal first."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run dev"
+run = "bun run dev"
 
 [tasks.web-check]
 description = "Run svelte-check + tsc against the SPA."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run check"
+run = "bun run check"
 
 [tasks.web-fmt]
 description = "Format the web SPA with Prettier (writes files in-place)."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run fmt"
+run = "bun run fmt"
 
 [tasks.web-fmt-check]
 description = "Check web SPA formatting with Prettier (fails on diff; used by CI)."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run fmt:check"
+run = "bun run fmt:check"
 
 [tasks.web-lint]
 description = "Lint the web SPA with ESLint."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run lint:js"
+run = "bun run lint:js"
 
 [tasks.web-test]
 description = "Run the web SPA unit tests."
 dir = "web"
 depends = ["web-install"]
-run = "pnpm run test"
+run = "bun run test"

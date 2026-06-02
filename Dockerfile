@@ -2,45 +2,81 @@
 #
 # Multi-stage, multi-arch (linux/amd64, linux/arm64) build for url-shortener.
 #
-# The Go builder runs on the build host's native architecture
-# (--platform=$BUILDPLATFORM) and cross-compiles for $TARGETARCH so we never
-# emulate the Go compiler under QEMU. The final image is distroless/static
-# nonroot, which is itself a multi-arch manifest.
+# A single builder stage runs on the build host's native architecture
+# (--platform=$BUILDPLATFORM) and cross-compiles the Go binary for
+# $TARGETARCH so we never emulate the Go compiler under QEMU. The final
+# image is distroless/static nonroot, which is itself a multi-arch manifest.
+#
+# Toolchain (Go + Bun + Java) is installed via mise so the Docker build
+# uses the exact same versions pinned in mise.toml as local development.
 
-ARG GO_VERSION=1.26.3
-ARG NODE_VERSION=24.16.0
-ARG PNPM_VERSION=11.5.0
+# Pin mise to a known release. Tool versions (go, bun, java, ...) are
+# resolved by mise from mise.toml.
+ARG MISE_VERSION=2026.5.18
 
 # -----------------------------------------------------------------------------
-# Web-assets stage: build the Vite + Svelte SPA into web/dist/.
-# `web/dist/` is .gitignore'd because the Go binary embeds it via
-# `//go:embed` -- so it has to exist before the Go builder runs.
-# Pinned to BUILDPLATFORM since the toolchain is JS, not arch-specific.
+# Builder stage: install mise -> install toolchain -> build SPA -> cross-compile.
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-trixie-slim AS web-builder
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS builder
 
+# OS prerequisites for mise itself (downloads + extracts tarballs) and for
+# fetching Go modules. Cleaning the apt list saves a few MB in the layer.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        ca-certificates \
+        curl \
+        git \
+        xz-utils \
+        bash \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install mise into /usr/local/bin via the official installer
+# (https://mise.jdx.dev/installing-mise.html). MISE_VERSION pins the release
+# and MISE_INSTALL_PATH lands the binary directly on $PATH so no post-install
+# move is needed.
+ARG MISE_VERSION
+RUN curl -fsSL https://mise.run | \
+    MISE_VERSION=v${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh
+
+# Activate mise's shims so subsequent RUN steps find go, bun, etc. on PATH.
+ENV MISE_DATA_DIR=/root/.local/share/mise
+ENV PATH=/root/.local/share/mise/shims:$PATH
+
+WORKDIR /src
+
+# Install the toolchain pinned in mise.toml (go, bun, java, ...). mise.toml
+# is the only file we need to copy at this point. Installs land in
+# $MISE_DATA_DIR (baked into this layer so `bun`, `go`, etc. are on PATH
+# in later steps); only the download cache is mounted to skip re-fetching
+# tarballs across builds.
+COPY mise.toml ./
+RUN --mount=type=cache,target=/root/.cache/mise \
+    mise trust mise.toml \
+    && mise install \
+    && mise reshim
+
+# -----------------------------------------------------------------------------
+# Web-assets sub-step: build the Vite + Svelte SPA into web/dist/.
+# `web/dist/` is .gitignore'd because the Go binary embeds it via //go:embed,
+# so it has to exist before `go build` runs.
+# -----------------------------------------------------------------------------
 WORKDIR /src/web
 
-# Enable corepack and activate the pinned pnpm release.
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
-
-# Cache pnpm install separately from the rest of the SPA source tree;
-# `package.json` and `pnpm-lock.yaml` are the only files that gate the install.
-COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+# Cache the bun install separately from the rest of the SPA source tree;
+# package.json and bun.lock are the only files that gate the install.
+COPY web/package.json web/bun.lock ./
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile
 
 # Bring in everything Vite needs: SPA source, the index.html shell,
-# `public/` static-asset overrides, the vendor-docs-assets script,
+# public/ static-asset overrides, the vendor-docs-assets script,
 # tsconfig + svelte.config + vite.config.
 COPY web/ ./
-RUN pnpm run build
+RUN bun run build
 
 # -----------------------------------------------------------------------------
-# Builder stage: cross-compile the Go binary.
+# Go build sub-step: cross-compile the Go binary with the SPA assets in place.
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-trixie AS builder
-
 WORKDIR /src
 
 # These are populated by buildx automatically.
@@ -52,20 +88,16 @@ ARG VERSION=v0.0.0-dev
 ARG COMMIT=unknown
 ARG DATE=1970-01-01T00:00:00Z
 
-# Cache module downloads in a separate layer.
+# Cache module downloads in a separate layer from the source copy.
 COPY go.mod go.sum* ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download
 
+# Copy the rest of the Go source tree. web/dist/ is already populated
+# in-place from the previous step, so the //go:embed directive finds it
+# without a cross-stage COPY --from=...
 COPY . .
-
-# Pull the Vite SPA build output (`dist/`) into the Go source tree so
-# the //go:embed directive finds it. The directory contains the SPA
-# shell (index.html), Vite's hashed bundles under assets/, and the
-# vendored Swagger UI + Redoc files under static/ (used by the API
-# docs viewers at /api/v1/docs and /api/v1/redoc).
-COPY --from=web-builder /src/web/dist ./web/dist
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

@@ -7,8 +7,8 @@
   "scripts": {
     "generate": "openapi-generator-cli generate",
     "dev": "vite",
-    "vendor:docs": "tsx scripts/vendor-docs-assets.ts",
-    "prebuild": "pnpm run vendor:docs",
+    "vendor:docs": "bun run scripts/vendor-docs-assets.ts",
+    "prebuild": "bun run vendor:docs",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
@@ -38,7 +38,6 @@
     "svelte-check": "^4.4.8",
     "swagger-ui-dist": "^5.32.6",
     "tailwindcss": "^4.2.4",
-    "tsx": "^4.22.3",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.33.1",
     "vite": "^8.0.14",

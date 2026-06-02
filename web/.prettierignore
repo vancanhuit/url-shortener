@@ -2,5 +2,4 @@ dist/
 node_modules/
 public/static/
 src/lib/generated/
-pnpm-lock.yaml
-pnpm-workspace.yaml
+bun.lock
