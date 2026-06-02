@@ -21,7 +21,8 @@ FROM --platform=$BUILDPLATFORM debian:trixie-slim AS builder
 
 # OS prerequisites for mise itself (downloads + extracts tarballs) and for
 # fetching Go modules. Cleaning the apt list saves a few MB in the layer.
-RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+RUN export DEBIAN_FRONTEND=noninteractive \
+  && apt-get update \
   && apt-get install --no-install-recommends -y \
   ca-certificates \
   curl \
