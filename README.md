@@ -31,24 +31,25 @@ To simplify the web service, no authentication is implemented.
 ### Development environment
 
 The toolchain assumes a **Unix-like host** &mdash; Linux, macOS, or
-**WSL2** on Windows. The mise task scripts use bash with
-`set -euo pipefail`, the npm scripts shell out to `mkdir`/`cp`,
-and the integration suite drives a local Docker daemon. Native
-Windows (cmd / PowerShell) is **not** supported; if you're on
-Windows, develop inside WSL2.
+**WSL2** on Windows. The `mise` task scripts use bash with
+`set -euo pipefail`, the `bun run` scripts in `package.json` shell
+out to `mkdir`/`cp`, and the integration suite drives a local Docker
+daemon. Native Windows (cmd / PowerShell) is **not** supported; if
+you're on Windows, develop inside WSL2.
 
 Prerequisites:
 
 - **Go 1.26+** &mdash; the language. The pinned toolchain version
   lives in `go.mod` (`toolchain go1.26.x`); newer is fine, older
   isn't.
-- **Node.js 24+** &mdash; for the Vite + Svelte + Tailwind v4 SPA
+- **Bun 1.3+** &mdash; for the Vite + Svelte + Tailwind v4 SPA
   toolchain under `web/`. Required only when building the web assets
-  locally; the `Dockerfile` brings its own Node stage.
+  locally; the `Dockerfile` installs Bun via `mise` as part of the
+  builder stage.
 - **[mise](https://mise.jdx.dev/)** &mdash; the task runner and tool
   version manager; every workflow in this README routes through it.
-  Running `mise install` installs Go, Node, and Java at the versions
-  pinned in `mise.toml`. Install mise from <https://mise.jdx.dev/>.
+  Running `mise install` installs Go, Bun, and Java at the versions
+  pinned in `mise.toml`. Install `mise` from <https://mise.jdx.dev/>.
 - **`golangci-lint` v2** &mdash; auto-installed by `mise run lint` at
   the version pinned in `mise.toml`, so a manual install is
   optional.
@@ -68,7 +69,8 @@ Optional but useful:
 
 The repository is the **single source of truth for tool versions**:
 `mise.toml` pins `GOLANGCI_LINT_VERSION` and `TRIVY_VERSION`, the
-`Dockerfile` pins Go and Node `ARG`s, and CI installs everything via
+`Dockerfile` pins `MISE_VERSION` and re-uses `mise.toml` for the
+Go and Bun versions, and CI installs everything via
 `jdx/mise-action`. There are no global installs of any of these tools
 required &mdash; running a task will install what it needs into
 `$(go env GOPATH)/bin` on demand.
@@ -77,7 +79,7 @@ required &mdash; running a task will install what it needs into
 
 ```sh
 mise run init                                  # install husky/commitlint dev dependencies
-mise run web-install                           # install npm deps for the Svelte + Vite + Tailwind toolchain
+mise run web-install                           # install bun deps for the Svelte + Vite + Tailwind toolchain
 mise run web-build                             # build the SPA into web/dist/ (consumed by //go:embed)
 mise run web-dev                               # vite dev server with HMR (proxies API + redirect to :8080)
 mise run web-check                             # svelte-check + tsc strict type-check
@@ -107,8 +109,8 @@ The HTML UI is embedded in the binary via `//go:embed`, so the compiled
 assets in `web/static/` must exist at `go build` time. They're treated as
 build artifacts (gitignored): `mise run build` always runs `mise run web-build`
 first so a fresh checkout works without ceremony, and the multi-stage
-`Dockerfile` has a dedicated `node` stage that produces them before the
-Go builder runs.
+`Dockerfile` runs Bun via `mise` to produce them before the Go build
+step in the same builder stage.
 
 ## Usage
 
@@ -585,7 +587,7 @@ Every image published to GHCR &mdash; tagged releases, the `:edge`
 floating tag, and the per-commit `:main-<sha>` tags &mdash; ships
 with two in-toto attestations stored next to the manifest:
 
-- An **SPDX SBOM** listing every Go module, npm package, and
+- An **SPDX SBOM** listing every Go module, Bun package, and
   OS-level component baked into the runtime image. Useful for
   answering "are we shipping &lt;vulnerable-dep&gt;?" without
   rebuilding from source.
@@ -799,15 +801,25 @@ week produces one PR per group rather than N separate PRs:
 | ---------------- | -------------------------------------------- | -------------------------------- |
 | `gomod`          | `go.mod`                                     | `gomod-minor-and-patch`          |
 | `github-actions` | `.github/workflows/*.yaml` (SHA-pinned)      | `actions-minor-and-patch`        |
-| `npm` (root)     | `package.json` (husky + commitlint)          | `npm-root-minor-and-patch`       |
-| `npm` (web SPA)  | `web/package.json`                           | `npm-web-minor-and-patch`        |
-| `docker`         | `Dockerfile` `FROM` lines (golang, node, distroless) | `docker-minor-and-patch` |
+| `bun` (root)     | `package.json` (husky + commitlint)          | `bun-root-minor-and-patch`       |
+| `bun` (web SPA)  | `web/package.json`                           | `bun-web-minor-and-patch`        |
+| `docker`         | `Dockerfile` `FROM` lines (debian, distroless) | `docker-minor-and-patch`       |
 
 Major-version bumps stay outside the groups and arrive as individual
 PRs; that's deliberate, since major releases (e.g. `actions/checkout`
 v5 dropping Node 16, Go module APIs changing) often need targeted
 review against the test suite. Commit messages use the `chore(deps)`
 / `chore(deps-dev)` prefix to satisfy `commitlint`.
+
+Every ecosystem also sets a one-day cooldown so newly published
+versions are observed before Dependabot opens a PR &mdash; a
+supply-chain hygiene measure that replaces pnpm 11's
+`minimumReleaseAge` check we lost when migrating to Bun:
+
+```yaml
+cooldown:
+  default-days: 1
+```
 
 ### Interaction with the `main` ruleset
 

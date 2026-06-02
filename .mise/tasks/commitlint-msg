@@ -2,4 +2,4 @@
 # [MISE] description="Lint a single commit-message string."
 #USAGE arg "<msg>" help="Commit message to lint"
 set -euo pipefail
-echo "${usage_msg}" | npx --no -- commitlint
+echo "${usage_msg}" | bunx --no-install commitlint
