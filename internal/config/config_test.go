@@ -14,9 +14,11 @@ import (
 func TestLoad_Defaults(t *testing.T) {
 	clearEnv(t)
 	// Postgres + Redis are required fields; set the minimum needed for
-	// Load() to succeed.
-	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
+	// Load() to succeed. The default env is prod, which additionally
+	// requires a TLS-enforcing DSN and an explicit pool ceiling.
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db?sslmode=require")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("URL_SHORTENER_DB_MAX_CONNS", "10")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -90,7 +92,8 @@ func TestLoad_EnvOverrides(t *testing.T) {
 
 func TestLoad_DBPoolEnvOverrides(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
+	// Default env is prod, so the DSN must enforce TLS.
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db?sslmode=require")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("URL_SHORTENER_DB_MAX_CONNS", "32")
 	t.Setenv("URL_SHORTENER_DB_MIN_CONNS", "4")
@@ -125,13 +128,14 @@ func TestValidate_RejectsBadDBPoolValues(t *testing.T) {
 
 	const (
 		redisURL    = "redis://localhost:6379/0"
-		databaseURL = "postgres://u:p@h:5432/db"
+		databaseURL = "postgres://u:p@h:5432/db?sslmode=require"
 	)
 	base := func() config.Config {
 		return config.Config{
 			Env: "prod", Addr: ":8080", BaseURL: "x",
 			LogLevel: "info", LogFormat: "json",
 			DatabaseURL: databaseURL, RedisURL: redisURL,
+			DBMaxConns: 10,
 		}
 	}
 
@@ -165,6 +169,77 @@ func TestValidate_RejectsBadDBPoolValues(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidate_ProdHardening covers the prod-only guards: the Postgres
+// DSN must enforce TLS, and db_max_conns must be set explicitly. Dev is
+// exempt from both so the local compose stack (sslmode=disable, default
+// pool) keeps working.
+func TestValidate_ProdHardening(t *testing.T) {
+	t.Parallel()
+
+	const redisURL = "redis://localhost:6379/0"
+	base := func(env, dsn string, maxConns int32) config.Config {
+		return config.Config{
+			Env: env, Addr: ":8080", BaseURL: "http://x",
+			LogLevel: "info", LogFormat: "json",
+			DatabaseURL: dsn, RedisURL: redisURL,
+			DBMaxConns: maxConns,
+		}
+	}
+
+	t.Run("prod with require + max_conns is valid", func(t *testing.T) {
+		t.Parallel()
+		c := base("prod", "postgres://u:p@h:5432/db?sslmode=require", 10)
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() = %v, want nil", err)
+		}
+	})
+
+	for _, mode := range []string{"verify-ca", "verify-full"} {
+		t.Run("prod accepts sslmode="+mode, func(t *testing.T) {
+			t.Parallel()
+			c := base("prod", "postgres://u:p@h:5432/db?sslmode="+mode, 10)
+			if err := c.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+
+	for _, mode := range []string{"disable", "prefer", "allow"} {
+		t.Run("prod rejects sslmode="+mode, func(t *testing.T) {
+			t.Parallel()
+			c := base("prod", "postgres://u:p@h:5432/db?sslmode="+mode, 10)
+			if err := c.Validate(); err == nil {
+				t.Errorf("Validate() = nil; want TLS-enforcement error for sslmode=%s", mode)
+			}
+		})
+	}
+
+	t.Run("prod rejects DSN without sslmode (defaults to prefer)", func(t *testing.T) {
+		t.Parallel()
+		c := base("prod", "postgres://u:p@h:5432/db", 10)
+		if err := c.Validate(); err == nil {
+			t.Error("Validate() = nil; want TLS-enforcement error for implicit sslmode=prefer")
+		}
+	})
+
+	t.Run("prod requires explicit db_max_conns", func(t *testing.T) {
+		t.Parallel()
+		c := base("prod", "postgres://u:p@h:5432/db?sslmode=require", 0)
+		if err := c.Validate(); err == nil {
+			t.Error("Validate() = nil; want error for unset db_max_conns in prod")
+		}
+	})
+
+	t.Run("dev is exempt from both guards", func(t *testing.T) {
+		t.Parallel()
+		c := base("dev", "postgres://u:p@h:5432/db?sslmode=disable", 0)
+		c.LogFormat = "text"
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() = %v, want nil for dev", err)
+		}
+	})
 }
 
 func TestValidate_RejectsBadValues(t *testing.T) {
@@ -222,8 +297,11 @@ func TestRedacted_StripsPasswords(t *testing.T) {
 
 func TestLoad_TLSAndTrustedProxiesEnvOverrides(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
+	// Default env is prod: the DSN must enforce TLS and the pool ceiling
+	// must be explicit.
+	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db?sslmode=require")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("URL_SHORTENER_DB_MAX_CONNS", "10")
 	// Files must exist for Validate's stat check to pass; create
 	// scratch files with arbitrary content (Validate doesn't try to
 	// parse the PEM, only Stat the path).
@@ -264,7 +342,7 @@ func TestValidate_TLSAndTrustedProxies(t *testing.T) {
 
 	const (
 		redisURL    = "redis://localhost:6379/0"
-		databaseURL = "postgres://u:p@h:5432/db"
+		databaseURL = "postgres://u:p@h:5432/db?sslmode=require"
 	)
 	// realDir + realCert/realKey are paths that exist, used by the
 	// happy-path subtests. Each subtest gets its own t.TempDir to
@@ -284,6 +362,7 @@ func TestValidate_TLSAndTrustedProxies(t *testing.T) {
 			Env: "prod", Addr: ":8080", BaseURL: "http://x",
 			LogLevel: "info", LogFormat: "json",
 			DatabaseURL: databaseURL, RedisURL: redisURL,
+			DBMaxConns: 10,
 		}, certPath, keyPath
 	}
 
@@ -381,6 +460,7 @@ func clearEnv(t *testing.T) {
 
 func TestLoad_CacheTTLEnvOverrides(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("URL_SHORTENER_ENV", "dev")
 	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("URL_SHORTENER_CACHE_TTL", "2h")
@@ -400,6 +480,7 @@ func TestLoad_CacheTTLEnvOverrides(t *testing.T) {
 
 func TestLoad_CacheTTLDefaultsToZero(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("URL_SHORTENER_ENV", "dev")
 	t.Setenv("URL_SHORTENER_DATABASE_URL", "postgres://u:p@h:5432/db")
 	t.Setenv("URL_SHORTENER_REDIS_URL", "redis://localhost:6379/0")
 
