@@ -376,19 +376,40 @@ Static assets are served from the embedded `web/dist/` filesystem:
 
 ## Operational endpoints
 
-The HTTP server exposes three operational endpoints:
+The HTTP server exposes these operational endpoints:
 
 | Endpoint    | Purpose                          | Behaviour                                                                                     |
 | ----------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
 | `/livez`   | Liveness probe                   | Always returns `200` + `{"status":"ok"}` while the process is responsive. No dependencies.    |
 | `/readyz`   | Readiness probe                  | Pings every registered dependency. Returns `200` when all are healthy, `503` otherwise.       |
 | `/version`  | Build metadata                   | Returns `{"version":"...","commit":"...","date":"..."}` baked into the binary at build time.  |
+| `/metrics`  | Prometheus exposition            | RED, Go runtime, Postgres pool, and business counters in the Prometheus text format.          |
 
 `/readyz` pings Postgres and Redis -- both are mandatory runtime
 dependencies (`config.Validate` rejects an empty
 `URL_SHORTENER_DATABASE_URL` or `URL_SHORTENER_REDIS_URL` at startup).
 Each check has its own line in the JSON body so operators can see
 which dependency is unhappy.
+
+### Metrics
+
+`/metrics` exposes, on a single Prometheus registry:
+
+- **RED** &mdash; `http_requests_total{method,route,status_code}` and
+  `http_request_duration_seconds{method,route}` for every request.
+- **Runtime** &mdash; the standard Go and process collectors.
+- **Postgres pool** (`pgxpool_*`) &mdash; point-in-time gauges
+  (`acquired_conns`, `idle_conns`, `total_conns`, `max_conns`, ...) and
+  lifetime counters (`acquire_total`, `empty_acquire_total`,
+  `canceled_acquire_total`, `max_lifetime_destroy_total`, ...). Alert on
+  sustained `acquired_conns` ≈ `max_conns` (saturation) and rising
+  `empty_acquire_total` (contention).
+- **Business** &mdash; `links_shortened_total{outcome}`
+  (`created`/`deduped`), `links_redirects_total{outcome}`
+  (`cache_hit`/`negative_hit`/`store_hit`/`not_found`/`gone`/`error`),
+  `links_code_collisions_total`, and `links_rate_limited_total`. Known
+  label series are pre-initialized to `0` so dashboards have no gaps
+  before the first occurrence.
 
 ## Deployment
 

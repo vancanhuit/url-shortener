@@ -38,8 +38,10 @@ func (h *Links) CreateLink(ctx context.Context, req api.CreateLinkRequestObject)
 	}
 	resp := h.makeResp(link)
 	if created {
+		h.metrics.IncShorten(ShortenCreated)
 		return api.CreateLink201JSONResponse(resp), nil
 	}
+	h.metrics.IncShorten(ShortenDeduped)
 	return api.CreateLink200JSONResponse(resp), nil
 }
 
@@ -121,6 +123,7 @@ func (h *Links) DeleteLink(ctx context.Context, req api.DeleteLinkRequestObject)
 func (h *Links) Redirect(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	if !shortener.ValidCode(code) {
+		h.metrics.IncRedirect(RedirectNotFound)
 		writeJSON(w, http.StatusNotFound, errResp(api.ErrorResponseCodeNotFound, "not found"))
 		return
 	}
@@ -128,10 +131,12 @@ func (h *Links) Redirect(w http.ResponseWriter, r *http.Request) {
 
 	target, hit, negative := h.cacheGet(ctx, code)
 	if hit && negative {
+		h.metrics.IncRedirect(RedirectNegativeHit)
 		writeJSON(w, http.StatusNotFound, errResp(api.ErrorResponseCodeNotFound, "not found"))
 		return
 	}
 	if hit {
+		h.metrics.IncRedirect(RedirectCacheHit)
 		h.recordClick(code)                           //nolint:contextcheck // goroutine outlives the request; uses its own timeout context
 		http.Redirect(w, r, target, http.StatusFound) //nolint:gosec // target is populated exclusively from DB-validated URLs (http/https, non-private hosts); the cache is internal, not user-controlled
 		return
@@ -140,26 +145,31 @@ func (h *Links) Redirect(w http.ResponseWriter, r *http.Request) {
 	link, err := h.store.GetLinkByCode(ctx, nil, code)
 	if errors.Is(err, store.ErrNotFound) {
 		h.cachePutNegative(ctx, code)
+		h.metrics.IncRedirect(RedirectNotFound)
 		writeJSON(w, http.StatusNotFound, errResp(api.ErrorResponseCodeNotFound, "not found"))
 		return
 	}
 	if err != nil {
 		h.logger.Error("links: redirect lookup failed", "error", err, "code", code)
+		h.metrics.IncRedirect(RedirectError)
 		writeJSON(w, http.StatusInternalServerError, errResp(api.ErrorResponseCodeInternalError, "internal error"))
 		return
 	}
 	if link.IsDeleted() {
 		h.cachePutNegative(ctx, code)
+		h.metrics.IncRedirect(RedirectGone)
 		writeJSON(w, http.StatusGone, errResp(api.ErrorResponseCodeLinkDeleted, "link has been deleted"))
 		return
 	}
 	if link.IsExpired() {
 		h.cachePutNegative(ctx, code)
+		h.metrics.IncRedirect(RedirectGone)
 		writeJSON(w, http.StatusGone, errResp(api.ErrorResponseCodeLinkExpired, "link has expired"))
 		return
 	}
 
 	h.cachePut(ctx, link)
+	h.metrics.IncRedirect(RedirectStoreHit)
 	h.recordClick(link.Code) //nolint:contextcheck // goroutine outlives the request; uses its own timeout context
 	http.Redirect(w, r, link.TargetURL, http.StatusFound)
 }

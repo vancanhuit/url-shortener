@@ -33,11 +33,15 @@ const rateLimitKeyPrefix = "ratelimit:create:"
 //
 // Fail-open: a Redis error is logged and the request is allowed through
 // to avoid turning a cache outage into a service outage.
+//
+// onReject, when non-nil, is invoked once per rejected request so the
+// caller can record a metric. It must be safe for concurrent use.
 func buildCreateRateLimiter(
 	cfg config.Config,
 	rl rateLimiter,
 	ipExtractor func(r *http.Request) string,
 	logger *slog.Logger,
+	onReject func(),
 ) []func(http.Handler) http.Handler {
 	if cfg.RateLimitRPS <= 0 {
 		return nil
@@ -69,6 +73,9 @@ func buildCreateRateLimiter(
 			}
 
 			if !allowed {
+				if onReject != nil {
+					onReject()
+				}
 				logger.Info("rate limit exceeded",
 					"identifier", ip,
 					"method", r.Method,
