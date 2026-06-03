@@ -92,6 +92,10 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 	reg := newMetricsRegistry()
 	reqTotal, reqDuration := newRequestMetrics(reg)
 	r.Use(buildMetricsMiddleware(reqTotal, reqDuration))
+	// Business counters (shorten/redirect/collision/rate-limit) and the
+	// Postgres connection-pool collector share the same registry.
+	bizMetrics := newBusinessMetrics(reg)
+	reg.MustRegister(newPoolStatsCollector(deps.Store.Pool().Stat))
 	// Cap request bodies before any handler reads them.
 	bodyLimit := cfg.MaxRequestBodyBytes
 	if bodyLimit <= 0 {
@@ -123,10 +127,11 @@ func New(cfg config.Config, logger *slog.Logger, deps Deps) *Server {
 		Generator:        deps.Generator,
 		BaseURL:          cfg.BaseURL,
 		Logger:           logger,
+		Metrics:          bizMetrics,
 		CacheTTL:         cfg.CacheTTL,
 		NegativeCacheTTL: cfg.NegativeCacheTTL,
 	})
-	createMW := buildCreateRateLimiter(cfg, deps.Cache, ipExtractor, logger)
+	createMW := buildCreateRateLimiter(cfg, deps.Cache, ipExtractor, logger, bizMetrics.incRateLimited)
 	links.Mount(r, createMW...)
 
 	// SPA shell + static assets.

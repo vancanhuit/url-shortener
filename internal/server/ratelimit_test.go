@@ -53,7 +53,7 @@ func TestBuildCreateRateLimiter_DisabledByDefault(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{} // zero value, RateLimitRPS=0
 	// rl is nil intentionally: the function must return before touching it.
-	if got := buildCreateRateLimiter(cfg, nil, nil, slog.New(slog.DiscardHandler)); got != nil {
+	if got := buildCreateRateLimiter(cfg, nil, nil, slog.New(slog.DiscardHandler), nil); got != nil {
 		t.Errorf("buildCreateRateLimiter(rps=0) = %d middleware, want nil", len(got))
 	}
 }
@@ -65,7 +65,8 @@ func TestBuildCreateRateLimiter_DisabledByDefault(t *testing.T) {
 func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 2}
-	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler))
+	rejects := 0
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler), func() { rejects++ })
 	if len(mws) != 1 {
 		t.Fatalf("buildCreateRateLimiter mws = %d, want 1", len(mws))
 	}
@@ -113,6 +114,9 @@ func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 	if !strings.Contains(strings.ToLower(resp.Error), "rate limit") {
 		t.Errorf("error message = %q, want substring 'rate limit'", resp.Error)
 	}
+	if rejects != 1 {
+		t.Errorf("onReject invocations = %d, want 1", rejects)
+	}
 }
 
 // TestBuildCreateRateLimiter_PerIPIsolation: distinct client IPs each
@@ -122,7 +126,7 @@ func TestBuildCreateRateLimiter_DeniesAfterBurst(t *testing.T) {
 func TestBuildCreateRateLimiter_PerIPIsolation(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 1}
-	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler), nil)
 
 	r := chi.NewRouter()
 	r.With(mws...).Post("/x", func(w http.ResponseWriter, _ *http.Request) {
@@ -157,7 +161,7 @@ func TestBuildCreateRateLimiter_PerIPIsolation(t *testing.T) {
 func TestBuildCreateRateLimiter_BurstDerivedFromRPS(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{RateLimitRPS: 0.25, RateLimitBurst: 0}
-	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, newFakeRateLimiter(), nil, slog.New(slog.DiscardHandler), nil)
 
 	r := chi.NewRouter()
 	r.With(mws...).Post("/x", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })
@@ -179,7 +183,7 @@ func TestBuildCreateRateLimiter_FailOpen(t *testing.T) {
 
 	errRL := &errorRateLimiter{}
 	cfg := config.Config{RateLimitRPS: 1, RateLimitBurst: 1}
-	mws := buildCreateRateLimiter(cfg, errRL, nil, slog.New(slog.DiscardHandler))
+	mws := buildCreateRateLimiter(cfg, errRL, nil, slog.New(slog.DiscardHandler), nil)
 
 	r := chi.NewRouter()
 	hits := 0
