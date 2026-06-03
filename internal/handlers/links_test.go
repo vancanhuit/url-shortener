@@ -1138,9 +1138,11 @@ func TestDelete_LiveCodeReturns204AndStampsDeletedAt(t *testing.T) {
 
 // TestDelete_InvalidatesCacheEntry: a redirect that previously cached
 // the target must not keep serving it after the row is soft-deleted.
-// We seed the cache directly (rather than walking through Redirect)
-// to keep the assertion narrowly scoped to the cache-invalidation
-// behavior of Delete itself.
+// Delete primes a negative cache entry, so the prior positive value is
+// overwritten with the sentinel rather than merely removed. We seed the
+// cache directly (rather than walking through Redirect) to keep the
+// assertion narrowly scoped to the cache-invalidation behavior of Delete
+// itself.
 func TestDelete_InvalidatesCacheEntry(t *testing.T) {
 	t.Parallel()
 	st, cc := newFakeStore(), newFakeCache()
@@ -1160,8 +1162,12 @@ func TestDelete_InvalidatesCacheEntry(t *testing.T) {
 
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
-	if _, present := cc.values["link:cachehit"]; present {
-		t.Error("cache entry survived DELETE; Del should have invalidated it")
+	v, present := cc.values["link:cachehit"]
+	if !present {
+		t.Fatal("cache entry missing after DELETE; want negative sentinel primed")
+	}
+	if v != "" {
+		t.Errorf("cache entry = %q after DELETE; want negative sentinel (empty string)", v)
 	}
 }
 

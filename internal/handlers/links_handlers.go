@@ -111,11 +111,15 @@ func (h *Links) DeleteLink(ctx context.Context, req api.DeleteLinkRequestObject)
 		h.logger.Error("links: delete failed", "error", err, "code", req.Code)
 		return api.DeleteLink500JSONResponse{InternalErrorJSONResponse: api.InternalErrorJSONResponse(errResp(api.ErrorResponseCodeInternalError, "internal error"))}, nil
 	}
-	// Best-effort cache invalidation so the next /r/:code surfaces 410
-	// immediately rather than waiting out the TTL.
-	if err := h.cache.Del(ctx, cacheKey(req.Code)); err != nil {
-		h.logger.Warn("links: cache del failed after delete", "error", err, "code", req.Code)
-	}
+	// Prime a negative cache entry so the next /r/:code is answered from
+	// Redis instead of falling through to the store. cachePutNegative
+	// overwrites any positive value under the same key, so a separate Del
+	// is redundant. Note the redirect path already converges on this state:
+	// the first post-delete redirect that reaches the store records the
+	// same negative sentinel, after which deleted codes resolve as 404.
+	// Priming here just closes the window where a stale positive entry
+	// could still serve a 302 to the deleted target before its TTL lapses.
+	h.cachePutNegative(ctx, req.Code)
 	return api.DeleteLink204Response{}, nil
 }
 
