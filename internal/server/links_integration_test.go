@@ -209,11 +209,16 @@ func TestLinksAPI_CreateGetRedirectFlow(t *testing.T) {
 //
 //  1. POST creates a link, populating the cache via the create path.
 //  2. /r/:code redirects (302) and lands a cached entry.
-//  3. DELETE returns 204; the cache is invalidated server-side.
-//  4. /r/:code now returns 410 (cache miss + tombstoned row).
-//  5. /api/v1/links/:code returns 410 with `code=link_deleted`,
-//     letting programmatic clients distinguish a retired link from
-//     an unknown one.
+//  3. DELETE returns 204; it primes a negative cache entry server-side,
+//     overwriting the positive entry from step 2.
+//  4. /r/:code now returns 404, served straight from the primed
+//     negative cache entry without touching the store. The redirect
+//     path's negative sentinel is generic (it cannot distinguish a
+//     retired code from one that never existed), so the precise
+//     "gone" semantics live on the API GET below.
+//  5. /api/v1/links/:code returns 410 with `code=link_deleted` -- this
+//     path always reads the store, so it still distinguishes a retired
+//     link from an unknown one for programmatic clients.
 //  6. A second DELETE returns 404 -- documents the API's
 //     semantically-idempotent-but-response-distinct behavior.
 //
@@ -244,8 +249,8 @@ func TestLinksAPI_DeleteFlow(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// 2. Warm the cache via /r so step 4 must observe an explicit
-	// invalidation rather than a serendipitous miss.
+	// 2. Warm the cache via /r so step 4 observes the delete overwriting
+	// a live positive entry rather than priming into an empty key.
 	rreq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/r/"+created.Code, nil)
 	rresp, err := httpClientNoRedirect.Do(rreq)
 	if err != nil {
@@ -268,15 +273,17 @@ func TestLinksAPI_DeleteFlow(t *testing.T) {
 		t.Fatalf("DELETE status = %d, want 204", dresp.StatusCode)
 	}
 
-	// 4. /r/:code -> 410 (cache invalidation + tombstoned row).
+	// 4. /r/:code -> 404, served from the negative cache entry primed by
+	// the delete (no store round-trip). The redirect sentinel is generic;
+	// the precise 410 link_deleted lives on the API GET in step 5.
 	rreq, _ = http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/r/"+created.Code, nil)
 	rresp, err = httpClientNoRedirect.Do(rreq)
 	if err != nil {
 		t.Fatalf("post-delete redirect: %v", err)
 	}
 	_ = rresp.Body.Close()
-	if rresp.StatusCode != http.StatusGone {
-		t.Errorf("redirect status = %d, want 410", rresp.StatusCode)
+	if rresp.StatusCode != http.StatusNotFound {
+		t.Errorf("redirect status = %d, want 404", rresp.StatusCode)
 	}
 
 	// 5. /api/v1/links/:code -> 410 + link_deleted.
