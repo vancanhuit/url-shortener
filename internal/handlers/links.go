@@ -122,6 +122,7 @@ type Links struct {
 	gen         Generator
 	baseURL     string
 	logger      *slog.Logger
+	metrics     Metrics
 	cacheTTL    time.Duration
 	negCacheTTL time.Duration
 
@@ -144,6 +145,7 @@ type LinksConfig struct {
 	Generator        Generator
 	BaseURL          string
 	Logger           *slog.Logger
+	Metrics          Metrics
 	CacheTTL         time.Duration
 	NegativeCacheTTL time.Duration
 }
@@ -162,12 +164,17 @@ func NewLinks(cfg LinksConfig) *Links {
 	if negCacheTTL <= 0 {
 		negCacheTTL = NegativeCacheTTL
 	}
+	metrics := cfg.Metrics
+	if metrics == nil {
+		metrics = noopMetrics{}
+	}
 	return &Links{
 		store:       cfg.Store,
 		cache:       cfg.Cache,
 		gen:         cfg.Generator,
 		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
 		logger:      logger,
+		metrics:     metrics,
 		cacheTTL:    cacheTTL,
 		negCacheTTL: negCacheTTL,
 	}

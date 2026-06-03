@@ -154,6 +154,7 @@ func (h *Links) createOrReuseAutoLink(ctx context.Context, target string) (store
 		}
 		link, created, err := h.store.CreateAutoLink(ctx, nil, code, target)
 		if errors.Is(err, store.ErrCodeTaken) {
+			h.metrics.IncCodeCollision()
 			h.logger.Warn("links: code collision; retrying", "attempt", i+1, "code", code)
 			continue
 		}
@@ -177,6 +178,7 @@ func (h *Links) createWithRandomCode(ctx context.Context, target string, expires
 		}
 		l, err := h.store.CreateLink(ctx, nil, code, target, expiresAt)
 		if errors.Is(err, store.ErrCodeTaken) {
+			h.metrics.IncCodeCollision()
 			h.logger.Warn("links: code collision; retrying", "attempt", i+1, "code", code)
 			continue
 		}
