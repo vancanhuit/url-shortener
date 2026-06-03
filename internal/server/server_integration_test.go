@@ -13,6 +13,7 @@ package server_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -219,7 +220,7 @@ func TestServer_RejectsOversizedRequestBody(t *testing.T) {
 }
 
 func TestServer_GracefulShutdownClosesListener(t *testing.T) {
-	base, stop := startFullServer(t)
+	base, _, _, ln, stop := startFullServerInternal(t)
 
 	// Verify the server is responsive.
 	if code, _ := getJSON(t, base+"/livez"); code != http.StatusOK {
@@ -228,12 +229,19 @@ func TestServer_GracefulShutdownClosesListener(t *testing.T) {
 
 	stop() // cancels context, waits for Serve to return
 
-	// After shutdown a fresh dial must fail (listener closed).
-	host := base[len("http://"):]
-	conn, err := net.DialTimeout("tcp", host, 500*time.Millisecond)
+	// After Serve returns, http.Server.Shutdown has closed the listener.
+	// Assert that directly via Accept rather than dialing the address:
+	// the ephemeral port can be reassigned to another listener the
+	// instant it's freed, so a fresh dial succeeding (or failing) is a
+	// race. A closed listener, by contrast, deterministically yields
+	// net.ErrClosed.
+	conn, err := ln.Accept()
 	if err == nil {
 		_ = conn.Close()
-		t.Errorf("expected dial to %s to fail after shutdown", host)
+		t.Fatal("listener still accepting connections after shutdown")
+	}
+	if !errors.Is(err, net.ErrClosed) {
+		t.Errorf("Accept after shutdown error = %v, want net.ErrClosed", err)
 	}
 }
 
