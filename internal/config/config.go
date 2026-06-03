@@ -53,14 +53,20 @@ type Config struct {
 	// Redacted() and by the JSON marshaller.
 	RedisURL string `env:"URL_SHORTENER_REDIS_URL" json:"redis_url"`
 
-	// AutoMigrate, when true (the default), makes `run` apply any pending
-	// migrations before starting the HTTP server. The migration path uses a
+	// AutoMigrate, when true, makes `run` apply any pending migrations
+	// before starting the HTTP server. The migration path uses a
 	// Postgres session-level advisory lock, so multiple replicas starting
 	// simultaneously are safe: the first to acquire the lock applies all
 	// pending migrations; the others wait, then see no pending work and
-	// continue. Set to false when you prefer to run `migrate up` as an
-	// explicit, separately-audited step outside the application process.
-	AutoMigrate bool `env:"URL_SHORTENER_AUTO_MIGRATE" envDefault:"true" json:"auto_migrate"`
+	// continue.
+	//
+	// The default is false: schema changes are applied as an explicit,
+	// separately-audited `migrate up` step outside the request-serving
+	// process. This keeps rolling deploys predictable -- a new replica
+	// will not silently mutate the schema out from under older replicas
+	// still serving traffic. Set to true for local development and simple
+	// single-instance setups where startup-time migration is convenient.
+	AutoMigrate bool `env:"URL_SHORTENER_AUTO_MIGRATE" envDefault:"false" json:"auto_migrate"`
 
 	// CodeLength is the length of auto-generated short codes. Validated by
 	// the shortener package: must be in [shortener.MinLength, MaxLength].
