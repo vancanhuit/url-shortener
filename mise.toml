@@ -1,5 +1,5 @@
 [tools]
-go = "1.26.3"
+go = "1.26.4"
 bun = "1.3.14"
 # JDK for @openapitools/openapi-generator-cli (used by `mise run web-generate`).
 java = "temurin-25"
