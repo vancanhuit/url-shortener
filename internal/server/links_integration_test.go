@@ -50,6 +50,18 @@ func startFullServer(t *testing.T) (string, func()) {
 // call from cleanup).
 func startFullServerWithDeps(t *testing.T) (string, *store.Store, *cache.Client, func()) {
 	t.Helper()
+	base, st, cc, _, stop := startFullServerInternal(t)
+	return base, st, cc, stop
+}
+
+// startFullServerInternal is the shared implementation behind
+// startFullServer / startFullServerWithDeps. It additionally returns the
+// net.Listener the server is bound to, which the graceful-shutdown test
+// uses to assert the listener is genuinely closed after Serve returns --
+// a check that's immune to the ephemeral-port reuse races a fresh dial
+// would be subject to.
+func startFullServerInternal(t *testing.T) (string, *store.Store, *cache.Client, net.Listener, func()) {
+	t.Helper()
 
 	dbURL := os.Getenv("URL_SHORTENER_TEST_DATABASE_URL")
 	if dbURL == "" {
@@ -111,7 +123,7 @@ func startFullServerWithDeps(t *testing.T) (string, *store.Store, *cache.Client,
 	}
 
 	waitForReady(t, "http://"+ln.Addr().String()+"/livez")
-	return "http://" + ln.Addr().String(), st, cc, stop
+	return "http://" + ln.Addr().String(), st, cc, ln, stop
 }
 
 // httpClientNoRedirect is a non-following client so we can inspect 302s.
