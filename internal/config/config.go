@@ -201,7 +201,8 @@ func (c Config) Validate() error {
 	// Parse the DSN now so a typo (missing scheme, bad port, unbalanced
 	// quote) surfaces as a clear validation error instead of as the first
 	// pool-acquire attempt failing with a less obvious message.
-	if _, err := pgx.ParseConfig(c.DatabaseURL); err != nil {
+	pgConf, err := pgx.ParseConfig(c.DatabaseURL)
+	if err != nil {
 		return fmt.Errorf("config: database_url: %w", err)
 	}
 	// Redis is a required runtime dependency: the cache is on the hot path
@@ -235,6 +236,24 @@ func (c Config) Validate() error {
 	}
 	if c.DBHealthCheckPeriod < 0 {
 		return fmt.Errorf("config: db_health_check_period must be >= 0")
+	}
+
+	// Production hardening. These configurations are valid in dev but are
+	// almost always mistakes in prod, where they are expensive to notice:
+	//
+	//   - A non-TLS Postgres connection ships credentials and link data in
+	//     cleartext. Require sslmode require/verify-ca/verify-full.
+	//   - An unbounded pool (db_max_conns left at pgx's small default, or 0)
+	//     lets a traffic burst exhaust the database's connection slots.
+	//     Force an explicit ceiling so capacity is a deliberate decision.
+	if c.Env == EnvProd {
+		if !dsnEnforcesTLS(pgConf) {
+			return fmt.Errorf("config: database_url must enforce TLS in prod " +
+				"(set sslmode=require, verify-ca, or verify-full)")
+		}
+		if c.DBMaxConns <= 0 {
+			return fmt.Errorf("config: db_max_conns must be set explicitly (> 0) in prod")
+		}
 	}
 
 	// Rate-limit knobs: both must be non-negative. RateLimitBurst
@@ -303,6 +322,28 @@ func (c Config) Validate() error {
 	}
 
 	return nil
+}
+
+// dsnEnforcesTLS reports whether a parsed Postgres DSN mandates TLS for
+// every connection attempt. pgx models sslmode in two places:
+//
+//   - The primary Config.TLSConfig is nil only for sslmode=disable.
+//   - sslmode=prefer/allow (which silently downgrade to cleartext) are
+//     implemented as Fallbacks with a nil TLSConfig.
+//
+// So TLS is genuinely enforced only when the primary has a TLSConfig and
+// no fallback offers a plaintext path. require, verify-ca, and verify-full
+// all satisfy this; disable, prefer, and allow do not.
+func dsnEnforcesTLS(cfg *pgx.ConnConfig) bool {
+	if cfg.TLSConfig == nil {
+		return false
+	}
+	for _, fb := range cfg.Fallbacks {
+		if fb.TLSConfig == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // Redacted returns a copy of c with passwords stripped from URL-shaped

@@ -140,11 +140,11 @@ local `compose.yaml` overrides them for development.
 | `URL_SHORTENER_BASE_URL`       | `http://localhost:8080`       | Public origin used when building short-link URLs.   |
 | `URL_SHORTENER_LOG_LEVEL`      | `info`                        | One of `debug`, `info`, `warn`, `error`.            |
 | `URL_SHORTENER_LOG_FORMAT`     | `text` in dev, `json` in prod | `text` (human-readable) or `json` (structured).     |
-| `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | **Required.** Postgres connection string. Redacted when printed. |
+| `URL_SHORTENER_DATABASE_URL`   | _(empty)_                     | **Required.** Postgres connection string. Redacted when printed. In `prod` the DSN must enforce TLS (`sslmode=require`, `verify-ca`, or `verify-full`); `disable`/`prefer`/`allow` are rejected at startup. |
 | `URL_SHORTENER_REDIS_URL`      | _(empty)_                     | **Required.** Redis connection string. Redacted when printed.   |
 | `URL_SHORTENER_AUTO_MIGRATE`   | `true`                        | When `true` (the default), `run` applies any pending migrations before serving. A Postgres advisory lock serializes concurrent startup across replicas. Set to `false` to run `migrate up` as an explicit, separately-audited step. |
 | `URL_SHORTENER_CODE_LENGTH`    | `7`                           | Length of auto-generated short codes (base62). Must be in [4, 64]. |
-| `URL_SHORTENER_DB_MAX_CONNS`           | _(pgx default: max(4, NumCPU))_ | Upper bound on simultaneous Postgres connections. Set above the default to absorb burst load without queueing requests on the pool. |
+| `URL_SHORTENER_DB_MAX_CONNS`           | _(pgx default: max(4, NumCPU))_ | Upper bound on simultaneous Postgres connections. Set above the default to absorb burst load without queueing requests on the pool. **Required (> 0) in `prod`** so the pool ceiling is a deliberate decision rather than pgx's small default. |
 | `URL_SHORTENER_DB_MIN_CONNS`           | _(pgx default: 0)_              | Idle connections kept warm. Useful to amortize TLS/handshake cost on bursty workloads. |
 | `URL_SHORTENER_DB_MAX_CONN_LIFETIME`   | _(pgx default: 1h)_             | Hard cap on a connection's age. Forces rotation through floating-IP failovers and clears DB-side connection-state drift. Accepts Go duration syntax (e.g. `30m`, `2h`). |
 | `URL_SHORTENER_DB_MAX_CONN_IDLE_TIME`  | _(pgx default: 30m)_            | How long a connection may sit unused before being closed. |
